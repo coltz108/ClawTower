@@ -474,9 +474,13 @@ echo ""
 echo -e "  ClawAV locks down the agent's user account (UID $WATCH_UID) so it"
 echo -e "  cannot disable, modify, or bypass the watchdog."
 echo ""
-echo -e "  ${YELLOW}You need a separate human admin account${NC} to manage the system."
-echo -e "  This account has full sudo access — no restrictions."
-echo -e "  The agent cannot access or impersonate this account."
+echo -e "  ${RED}${BOLD}⚠️  A separate human admin account is REQUIRED.${NC}"
+echo -e "  ${YELLOW}This is the only account that can manage ClawAV after lockdown.${NC}"
+echo -e "  ${YELLOW}Without it, you'll need recovery mode (boot from USB) to make changes.${NC}"
+echo ""
+echo -e "  ${RED}${BOLD}🔒 NEVER share this account's password with your AI agent.${NC}"
+echo -e "  ${RED}${BOLD}   The entire security model depends on this separation.${NC}"
+echo -e "  ${RED}${BOLD}   If the agent knows these credentials, it can bypass all protections.${NC}"
 echo ""
 
 AGENT_USERNAME=$(getent passwd "$WATCH_UID" | cut -d: -f1 || echo "")
@@ -484,6 +488,17 @@ ADMIN_USERNAME=""
 
 echo -en "  ${CYAN}Create a human admin account? [Y/n]: ${NC}" > /dev/tty
 read -r create_admin < /dev/tty
+
+if [[ "$create_admin" =~ ^[nN] ]]; then
+    echo ""
+    warn "Skipping admin account creation."
+    warn "Make sure you have another account with sudo access!"
+    echo -en "  ${CYAN}Do you already have a separate admin account? [y/N]: ${NC}" > /dev/tty
+    read -r has_admin < /dev/tty
+    if [[ ! "$has_admin" =~ ^[yY] ]]; then
+        die "Cannot proceed without a human admin account. Re-run the installer and create one."
+    fi
+fi
 
 if [[ ! "$create_admin" =~ ^[nN] ]]; then
     echo -en "  ${CYAN}Username for admin account: ${NC}" > /dev/tty
@@ -523,8 +538,15 @@ SUDOEOF
 
         echo ""
         log "✓ Admin account '$ADMIN_USERNAME' created with full sudo access"
-        echo -e "  ${YELLOW}Use this account for system administration.${NC}"
-        echo -e "  ${YELLOW}SSH in as: ssh ${ADMIN_USERNAME}@$(hostname)${NC}"
+        echo ""
+        echo -e "  ${GREEN}Use this account for all system administration.${NC}"
+        echo -e "  ${GREEN}SSH in as: ssh ${ADMIN_USERNAME}@$(hostname)${NC}"
+        echo ""
+        echo -e "  ${RED}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${RED}${BOLD}║  🚨  NEVER share '${ADMIN_USERNAME}' credentials with your AI agent  ║${NC}"
+        echo -e "  ${RED}${BOLD}║  The agent CANNOT know this password or SSH key.          ║${NC}"
+        echo -e "  ${RED}${BOLD}║  This is the foundation of ClawAV's security model.       ║${NC}"
+        echo -e "  ${RED}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
         echo ""
     fi
 fi
