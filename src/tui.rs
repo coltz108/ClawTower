@@ -37,6 +37,7 @@ pub enum FieldType {
     Text,
     Bool,
     Number,
+    Action(String), // Action command to run on Enter
 }
 
 pub struct App {
@@ -209,7 +210,7 @@ impl App {
                     // Start editing
                     if !self.config_fields.is_empty() {
                         let field = &self.config_fields[self.config_selected_field];
-                        match field.field_type {
+                        match &field.field_type {
                             FieldType::Bool => {
                                 // Toggle boolean values directly
                                 if let Some(ref mut config) = self.config {
@@ -218,6 +219,10 @@ impl App {
                                     apply_field_to_config(config, section, &field.name, new_value);
                                     self.refresh_fields();
                                 }
+                            }
+                            FieldType::Action(action) => {
+                                let action = action.clone();
+                                self.run_action(&action);
                             }
                             _ => {
                                 // Start text editing for other types
@@ -230,6 +235,35 @@ impl App {
                 _ => {}
             }
         }
+    }
+
+    fn run_action(&mut self, action: &str) {
+        let (cmd, args): (&str, &[&str]) = match action {
+            "install_falco" => {
+                self.config_saved_message = Some("Installing Falco... (this may take a moment)".to_string());
+                ("bash", &["-c", "apt-get update -qq && apt-get install -y -qq falco 2>&1 || dnf install -y falco 2>&1 || echo 'INSTALL_FAILED'"] as &[&str])
+            }
+            "install_samhain" => {
+                self.config_saved_message = Some("Installing Samhain... (this may take a moment)".to_string());
+                ("bash", &["-c", "apt-get update -qq && apt-get install -y -qq samhain 2>&1 || dnf install -y samhain 2>&1 || echo 'INSTALL_FAILED'"] as &[&str])
+            }
+            _ => return,
+        };
+        match std::process::Command::new(cmd).args(args).output() {
+            Ok(output) => {
+                let out = String::from_utf8_lossy(&output.stdout);
+                if output.status.success() && !out.contains("INSTALL_FAILED") {
+                    self.config_saved_message = Some("✅ Installed! Refresh with Left/Right.".to_string());
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    self.config_saved_message = Some(format!("❌ Install failed (run with sudo?) {}", stderr.chars().take(60).collect::<String>()));
+                }
+            }
+            Err(e) => {
+                self.config_saved_message = Some(format!("❌ {}", e));
+            }
+        }
+        self.refresh_fields();
     }
 }
 
@@ -339,34 +373,78 @@ fn get_section_fields(config: &Config, section: &str) -> Vec<ConfigField> {
                 field_type: FieldType::Text,
             },
         ],
-        "falco" => vec![
-            ConfigField {
-                name: "enabled".to_string(),
-                value: config.falco.enabled.to_string(),
-                section: section.to_string(),
-                field_type: FieldType::Bool,
-            },
-            ConfigField {
-                name: "log_path".to_string(),
-                value: config.falco.log_path.clone(),
-                section: section.to_string(),
-                field_type: FieldType::Text,
-            },
-        ],
-        "samhain" => vec![
-            ConfigField {
-                name: "enabled".to_string(),
-                value: config.samhain.enabled.to_string(),
-                section: section.to_string(),
-                field_type: FieldType::Bool,
-            },
-            ConfigField {
-                name: "log_path".to_string(),
-                value: config.samhain.log_path.clone(),
-                section: section.to_string(),
-                field_type: FieldType::Text,
-            },
-        ],
+        "falco" => {
+            let falco_installed = std::process::Command::new("which")
+                .arg("falco")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            let mut fields = vec![
+                ConfigField {
+                    name: "enabled".to_string(),
+                    value: config.falco.enabled.to_string(),
+                    section: section.to_string(),
+                    field_type: FieldType::Bool,
+                },
+                ConfigField {
+                    name: "log_path".to_string(),
+                    value: config.falco.log_path.clone(),
+                    section: section.to_string(),
+                    field_type: FieldType::Text,
+                },
+                ConfigField {
+                    name: "status".to_string(),
+                    value: if falco_installed { "✅ installed".to_string() } else { "❌ not installed".to_string() },
+                    section: section.to_string(),
+                    field_type: FieldType::Text,
+                },
+            ];
+            if !falco_installed {
+                fields.push(ConfigField {
+                    name: "▶ Install Falco".to_string(),
+                    value: "Press Enter to install".to_string(),
+                    section: section.to_string(),
+                    field_type: FieldType::Action("install_falco".to_string()),
+                });
+            }
+            fields
+        },
+        "samhain" => {
+            let samhain_installed = std::process::Command::new("which")
+                .arg("samhain")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            let mut fields = vec![
+                ConfigField {
+                    name: "enabled".to_string(),
+                    value: config.samhain.enabled.to_string(),
+                    section: section.to_string(),
+                    field_type: FieldType::Bool,
+                },
+                ConfigField {
+                    name: "log_path".to_string(),
+                    value: config.samhain.log_path.clone(),
+                    section: section.to_string(),
+                    field_type: FieldType::Text,
+                },
+                ConfigField {
+                    name: "status".to_string(),
+                    value: if samhain_installed { "✅ installed".to_string() } else { "❌ not installed".to_string() },
+                    section: section.to_string(),
+                    field_type: FieldType::Text,
+                },
+            ];
+            if !samhain_installed {
+                fields.push(ConfigField {
+                    name: "▶ Install Samhain".to_string(),
+                    value: "Press Enter to install".to_string(),
+                    section: section.to_string(),
+                    field_type: FieldType::Action("install_samhain".to_string()),
+                });
+            }
+            fields
+        },
         "api" => vec![
             ConfigField {
                 name: "enabled".to_string(),
