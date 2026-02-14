@@ -226,7 +226,6 @@ Type=simple
 ExecStart=/usr/local/bin/clawav --headless /etc/clawav/config.toml
 Restart=always
 RestartSec=5
-WatchdogSec=30
 NoNewPrivileges=true
 ReadWritePaths=/var/log/clawav /var/run/clawav /etc/clawav
 RuntimeDirectory=clawav
