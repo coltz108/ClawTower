@@ -303,54 +303,12 @@ pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path, secu
 
             for alert in &alerts {
                 if alert.watched {
-                    // Check content against SecureClaw patterns
-                    if let Some(engine) = secureclaw {
-                        if let Ok(content) = std::fs::read_to_string(&alert.file) {
-                            let matches = engine.check_text(&content);
-                            if !matches.is_empty() {
-                                // QUARANTINE: content flagged by SecureClaw
-                                let match_details: Vec<String> = matches.iter().map(|m| {
-                                    format!("[{}:{}] pattern '{}' matched: '{}'", 
-                                        m.database, m.category, m.pattern_name, 
-                                        &m.matched_text[..m.matched_text.len().min(80)])
-                                }).collect();
-                                
-                                // Move file to quarantine
-                                let quarantine_dir = Path::new(QUARANTINE_DIR);
-                                let _ = std::fs::create_dir_all(quarantine_dir);
-                                let filename = alert.file.file_name().unwrap_or_default().to_string_lossy();
-                                let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-                                let quarantine_path = quarantine_dir.join(format!("{}.{}", filename, timestamp));
-                                
-                                if let Err(e) = std::fs::rename(&alert.file, &quarantine_path) {
-                                    results.push(ScanResult::new("cognitive", ScanStatus::Fail,
-                                        &format!("QUARANTINE FAILED for {}: {} — Patterns: {}", filename, e, match_details.join("; "))));
-                                } else {
-                                    // Set restrictive permissions (root:root 0600)
-                                    let _ = std::process::Command::new("sudo")
-                                        .args(["chown", "root:root", &quarantine_path.to_string_lossy()])
-                                        .output();
-                                    let _ = std::process::Command::new("sudo")
-                                        .args(["chmod", "600", &quarantine_path.to_string_lossy()])
-                                        .output();
-                                    
-                                    // Restore from shadow
-                                    let shadow_path = Path::new(SHADOW_DIR).join(filename.as_ref());
-                                    if shadow_path.exists() {
-                                        let _ = std::fs::copy(&shadow_path, &alert.file);
-                                    }
-                                    
-                                    results.push(ScanResult::new("cognitive", ScanStatus::Fail,
-                                        &format!("🚨 QUARANTINED: {} — Dangerous content detected and file quarantined to {}. Previous safe version restored. Patterns matched: {}", 
-                                            filename, quarantine_path.display(), match_details.join("; "))));
-                                }
-                                // Do NOT rebaseline — we restored the old version
-                                continue;
-                            }
-                        }
-                    }
+                    // Watched files (MEMORY.md) are mutable working documents — they legitimately
+                    // contain command references, IPs, paths, etc. as technical documentation.
+                    // Do NOT run SecureClaw content scanning on them (too many false positives).
+                    // SecureClaw scanning is reserved for protected identity files only.
                     
-                    // Clean change — WARN level, rebaseline
+                    // Clean change — report diff, rebaseline
                     results.push(ScanResult::new("cognitive", ScanStatus::Warn,
                         &format!("📝 {}", alert)));
                     baseline.update_file(&alert.file);

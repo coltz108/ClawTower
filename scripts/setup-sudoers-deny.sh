@@ -61,6 +61,19 @@ openclaw ALL=(ALL) !/usr/bin/sudo -i, \
 # Block editing sudoers (prevent removing these rules)
 openclaw ALL=(ALL) !/usr/sbin/visudo, \
                     !/usr/bin/sudoedit
+
+# Block user/account manipulation (prevent compromising admin account)
+openclaw ALL=(ALL) !/usr/bin/passwd, \
+                    !/usr/sbin/useradd, \
+                    !/usr/sbin/usermod, \
+                    !/usr/sbin/userdel, \
+                    !/usr/sbin/groupmod, \
+                    !/usr/sbin/deluser, \
+                    !/usr/sbin/adduser, \
+                    !/usr/bin/chage, \
+                    !/usr/bin/gpasswd, \
+                    !/usr/bin/chsh, \
+                    !/usr/bin/chfn
 EOF
 
 chmod 440 "$DENY_FILE"

@@ -589,6 +589,19 @@ $AGENT_USERNAME ALL=(ALL) !/usr/bin/sudo -i, \\
 # Block editing sudoers (prevent removing these rules)
 $AGENT_USERNAME ALL=(ALL) !/usr/sbin/visudo, \\
                     !/usr/bin/sudoedit
+
+# Block user/account manipulation (prevent compromising admin account)
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/passwd, \\
+                    !/usr/sbin/useradd, \\
+                    !/usr/sbin/usermod, \\
+                    !/usr/sbin/userdel, \\
+                    !/usr/sbin/groupmod, \\
+                    !/usr/sbin/deluser, \\
+                    !/usr/sbin/adduser, \\
+                    !/usr/bin/chage, \\
+                    !/usr/bin/gpasswd, \\
+                    !/usr/bin/chsh, \\
+                    !/usr/bin/chfn
 DENYEOF
 
     chmod 440 "$DENY_FILE"
