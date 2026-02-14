@@ -33,6 +33,13 @@ pub struct ConfigField {
 }
 
 #[derive(Clone)]
+#[derive(PartialEq)]
+pub enum ConfigFocus {
+    Sidebar,  // Up/Down = sections, Enter = enter fields, Left/Right = switch tabs
+    Fields,   // Up/Down = fields, Enter = edit, Backspace = back to sidebar
+}
+
+#[derive(Clone)]
 pub enum FieldType {
     Text,
     Bool,
@@ -52,6 +59,7 @@ pub struct App {
     pub config_selected_section: usize,
     pub config_fields: Vec<ConfigField>,
     pub config_selected_field: usize,
+    pub config_focus: ConfigFocus,
     pub config_editing: bool,
     pub config_edit_buffer: String,
     pub config_saved_message: Option<String>,
@@ -96,6 +104,7 @@ impl App {
             config_selected_section: 0,
             config_fields: Vec::new(),
             config_selected_field: 0,
+            config_focus: ConfigFocus::Sidebar,
             config_editing: false,
             config_edit_buffer: String::new(),
             config_saved_message: None,
@@ -168,15 +177,17 @@ impl App {
                     self.selected_tab = self.tab_titles.len() - 1;
                 }
             }
-            KeyCode::Right if !self.config_editing && self.selected_tab != 5 => {
+            KeyCode::Right if !self.config_editing && !(self.selected_tab == 5 && self.config_focus == ConfigFocus::Fields) => {
                 self.selected_tab = (self.selected_tab + 1) % self.tab_titles.len();
+                if self.selected_tab == 5 { self.config_focus = ConfigFocus::Sidebar; }
             }
-            KeyCode::Left if !self.config_editing && self.selected_tab != 5 => {
+            KeyCode::Left if !self.config_editing && !(self.selected_tab == 5 && self.config_focus == ConfigFocus::Fields) => {
                 if self.selected_tab > 0 {
                     self.selected_tab -= 1;
                 } else {
                     self.selected_tab = self.tab_titles.len() - 1;
                 }
+                if self.selected_tab == 5 { self.config_focus = ConfigFocus::Sidebar; }
             }
             // Config tab specific keys (including Left/Right for section nav)
             _ if self.selected_tab == 5 => self.handle_config_key(key, modifiers),
@@ -213,80 +224,98 @@ impl App {
                 _ => {}
             }
         } else {
-            // Handle navigation mode
-            match (key, modifiers) {
-                (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                    // Save config — try direct first, fall back to sudo
-                    if let (Some(ref config), Some(ref path)) = (&self.config, &self.config_path) {
-                        if config.save(path).is_ok() {
-                            self.config_saved_message = Some("Saved!".to_string());
-                        } else if nix_is_root() {
-                            self.config_saved_message = Some("Save failed!".to_string());
-                        } else {
-                            // Need sudo — write to temp, then sudo copy
-                            let path_str = path.display().to_string();
-                            self.sudo_popup = Some(SudoPopup {
-                                action: format!("save_config:{}", path_str),
-                                password: String::new(),
-                                message: format!("Save config to {}", path_str),
-                                status: SudoStatus::WaitingForPassword,
-                            });
-                            // Write config to temp file for later sudo copy
-                            let _ = config.save(&PathBuf::from("/tmp/clawav-config-save.toml"));
+            // Ctrl+S save always available
+            if key == KeyCode::Char('s') && modifiers == KeyModifiers::CONTROL {
+                if let (Some(ref config), Some(ref path)) = (&self.config, &self.config_path) {
+                    if config.save(path).is_ok() {
+                        self.config_saved_message = Some("Saved!".to_string());
+                    } else if nix_is_root() {
+                        self.config_saved_message = Some("Save failed!".to_string());
+                    } else {
+                        let path_str = path.display().to_string();
+                        self.sudo_popup = Some(SudoPopup {
+                            action: format!("save_config:{}", path_str),
+                            password: String::new(),
+                            message: format!("Save config to {}", path_str),
+                            status: SudoStatus::WaitingForPassword,
+                        });
+                        let _ = config.save(&PathBuf::from("/tmp/clawav-config-save.toml"));
+                    }
+                }
+                return;
+            }
+
+            match self.config_focus {
+                ConfigFocus::Sidebar => {
+                    // Sidebar: Up/Down = sections, Enter = go into fields
+                    // Left/Right = switch tabs (handled by parent on_key)
+                    match key {
+                        KeyCode::Up => {
+                            if self.config_selected_section > 0 {
+                                self.config_selected_section -= 1;
+                                self.config_selected_field = 0;
+                                self.refresh_fields();
+                            }
                         }
+                        KeyCode::Down => {
+                            if self.config_selected_section < self.config_sections.len() - 1 {
+                                self.config_selected_section += 1;
+                                self.config_selected_field = 0;
+                                self.refresh_fields();
+                            }
+                        }
+                        KeyCode::Enter => {
+                            // Enter the fields panel
+                            if !self.config_fields.is_empty() {
+                                self.config_focus = ConfigFocus::Fields;
+                                self.config_selected_field = 0;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                (KeyCode::Up, _) => {
-                    if !self.config_fields.is_empty() && self.config_selected_field > 0 {
-                        self.config_selected_field -= 1;
-                    }
-                }
-                (KeyCode::Down, _) => {
-                    if !self.config_fields.is_empty() && self.config_selected_field < self.config_fields.len() - 1 {
-                        self.config_selected_field += 1;
-                    }
-                }
-                (KeyCode::Left, _) => {
-                    if self.config_selected_section > 0 {
-                        self.config_selected_section -= 1;
-                        self.config_selected_field = 0;
-                        self.refresh_fields();
-                    }
-                }
-                (KeyCode::Right, _) => {
-                    if self.config_selected_section < self.config_sections.len() - 1 {
-                        self.config_selected_section += 1;
-                        self.config_selected_field = 0;
-                        self.refresh_fields();
-                    }
-                }
-                (KeyCode::Enter, _) => {
-                    // Start editing
-                    if !self.config_fields.is_empty() {
-                        let field = &self.config_fields[self.config_selected_field];
-                        match &field.field_type {
-                            FieldType::Bool => {
-                                // Toggle boolean values directly
-                                if let Some(ref mut config) = self.config {
-                                    let section = &self.config_sections[self.config_selected_section];
-                                    let new_value = if field.value == "true" { "false" } else { "true" };
-                                    apply_field_to_config(config, section, &field.name, new_value);
-                                    self.refresh_fields();
+                ConfigFocus::Fields => {
+                    // Fields: Up/Down = fields, Enter = edit, Backspace = back to sidebar
+                    match key {
+                        KeyCode::Backspace | KeyCode::Esc => {
+                            self.config_focus = ConfigFocus::Sidebar;
+                        }
+                        KeyCode::Up => {
+                            if self.config_selected_field > 0 {
+                                self.config_selected_field -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            if self.config_selected_field < self.config_fields.len().saturating_sub(1) {
+                                self.config_selected_field += 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if !self.config_fields.is_empty() {
+                                let field = &self.config_fields[self.config_selected_field];
+                                match &field.field_type {
+                                    FieldType::Bool => {
+                                        if let Some(ref mut config) = self.config {
+                                            let section = &self.config_sections[self.config_selected_section];
+                                            let new_value = if field.value == "true" { "false" } else { "true" };
+                                            apply_field_to_config(config, section, &field.name, new_value);
+                                            self.refresh_fields();
+                                        }
+                                    }
+                                    FieldType::Action(action) => {
+                                        let action = action.clone();
+                                        self.run_action(&action);
+                                    }
+                                    _ => {
+                                        self.config_editing = true;
+                                        self.config_edit_buffer = field.value.clone();
+                                    }
                                 }
                             }
-                            FieldType::Action(action) => {
-                                let action = action.clone();
-                                self.run_action(&action);
-                            }
-                            _ => {
-                                // Start text editing for other types
-                                self.config_editing = true;
-                                self.config_edit_buffer = field.value.clone();
-                            }
                         }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -893,23 +922,34 @@ fn render_config_tab(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
         .split(area);
 
+    let sidebar_focused = app.config_focus == ConfigFocus::Sidebar;
+    let fields_focused = app.config_focus == ConfigFocus::Fields;
+
     // Left: section list
     let section_items: Vec<ListItem> = app.config_sections.iter().enumerate().map(|(i, s)| {
         let style = if i == app.config_selected_section {
-            Style::default().fg(Color::Cyan).bold().add_modifier(Modifier::REVERSED)
+            if sidebar_focused {
+                Style::default().fg(Color::Cyan).bold().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().fg(Color::Cyan).bold()
+            }
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::DarkGray)
         };
-        ListItem::new(format!("  [{}]", s)).style(style)
+        ListItem::new(format!("  {}", s)).style(style)
     }).collect();
 
+    let sidebar_border = if sidebar_focused { Color::Cyan } else { Color::DarkGray };
+    let sidebar_title = if sidebar_focused { " Sections (↑↓ Enter) " } else { " Sections " };
     let sections_list = List::new(section_items)
-        .block(Block::default().borders(Borders::ALL).title(" Sections "));
+        .block(Block::default().borders(Borders::ALL)
+            .border_style(Style::default().fg(sidebar_border))
+            .title(sidebar_title));
     f.render_widget(sections_list, chunks[0]);
 
     // Right: fields for selected section
     let field_items: Vec<ListItem> = app.config_fields.iter().enumerate().map(|(i, field)| {
-        let is_selected = i == app.config_selected_field;
+        let is_selected = i == app.config_selected_field && fields_focused;
         let is_editing = is_selected && app.config_editing;
 
         let value_display = if is_editing {
@@ -920,21 +960,28 @@ fn render_config_tab(f: &mut Frame, area: Rect, app: &App) {
 
         let style = if is_selected {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::REVERSED)
-        } else {
+        } else if fields_focused {
             Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
         };
 
         ListItem::new(format!("  {}: {}", field.name, value_display)).style(style)
     }).collect();
 
+    let fields_border = if fields_focused { Color::Cyan } else { Color::DarkGray };
     let title = if let Some(ref msg) = app.config_saved_message {
         format!(" {} — {} ", app.config_sections[app.config_selected_section], msg)
+    } else if fields_focused {
+        format!(" [{}] — Enter to edit, Backspace to go back, Ctrl+S save ", app.config_sections[app.config_selected_section])
     } else {
-        format!(" [{}] — Enter to edit, Ctrl+S to save ", app.config_sections[app.config_selected_section])
+        format!(" [{}] ", app.config_sections[app.config_selected_section])
     };
 
     let fields_list = List::new(field_items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .block(Block::default().borders(Borders::ALL)
+            .border_style(Style::default().fg(fields_border))
+            .title(title));
     f.render_widget(fields_list, chunks[1]);
 }
 

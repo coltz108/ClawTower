@@ -161,6 +161,28 @@ async fn main() -> Result<()> {
     let subcommand = args.get(1).map(|s| s.as_str()).unwrap_or("run");
     let rest_args: Vec<String> = args.iter().skip(2).cloned().collect();
 
+    // Auto-escalate to root if not already running as root
+    // Skip for help/version which don't need privileges
+    if unsafe { libc::getuid() } != 0 
+        && !matches!(subcommand, "help" | "--help" | "-h" | "version" | "--version" | "-V") 
+    {
+        eprintln!("🛡️  ClawAV requires root privileges.");
+        eprintln!("   Enter your password to continue:\n");
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("clawav"));
+        let status = std::process::Command::new("sudo")
+            .arg("--")
+            .arg(&exe)
+            .args(&args[1..])
+            .status();
+        match status {
+            Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+            Err(e) => {
+                eprintln!("Failed to escalate privileges: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     match subcommand {
         "help" | "--help" | "-h" => {
             print_help();
