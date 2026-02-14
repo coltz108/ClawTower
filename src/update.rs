@@ -64,13 +64,21 @@ fn verify_admin_key(key: &str) -> Result<bool> {
     Ok(crate::admin::verify_key(key, hash.trim()))
 }
 
-/// Fetch latest release info from GitHub API
-fn fetch_latest_release() -> Result<(String, String, Option<String>)> {
+/// Fetch release info from GitHub API (latest or specific version)
+fn fetch_release(version: Option<&str>) -> Result<(String, String, Option<String>)> {
     // Returns (tag, download_url, sha256_url)
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        GITHUB_REPO
-    );
+    let url = if let Some(ver) = version {
+        let tag = if ver.starts_with('v') { ver.to_string() } else { format!("v{}", ver) };
+        format!(
+            "https://api.github.com/repos/{}/releases/tags/{}",
+            GITHUB_REPO, tag
+        )
+    } else {
+        format!(
+            "https://api.github.com/repos/{}/releases/latest",
+            GITHUB_REPO
+        )
+    };
 
     let client = reqwest::blocking::Client::builder()
         .user_agent("clawav-updater")
@@ -218,6 +226,19 @@ fn get_custom_binary_path(args: &[String]) -> Option<String> {
     None
 }
 
+/// Parse --version flag from args (target release version)
+fn get_target_version(args: &[String]) -> Option<String> {
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--version" || arg == "-v" {
+            return args.get(i + 1).cloned();
+        }
+        if let Some(ver) = arg.strip_prefix("--version=") {
+            return Some(ver.to_string());
+        }
+    }
+    None
+}
+
 /// Main entry point for `clawav update`
 pub fn run_update(args: &[String]) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
@@ -227,6 +248,7 @@ pub fn run_update(args: &[String]) -> Result<()> {
 
     let check_only = args.iter().any(|a| a == "--check");
     let custom_binary = get_custom_binary_path(args);
+    let target_version = get_target_version(args);
 
     // Custom binary path requires admin key (no CI verification available)
     // GitHub release path does NOT require admin key (SHA256 checksum is sufficient)
@@ -249,11 +271,15 @@ pub fn run_update(args: &[String]) -> Result<()> {
         (data, "custom".to_string())
     } else {
         // GitHub release path — checksum verification is the trust anchor
-        eprintln!("Checking GitHub releases...");
-        let (tag, download_url, sha256_url) = fetch_latest_release()?;
+        if let Some(ref ver) = target_version {
+            eprintln!("Fetching release {}...", ver);
+        } else {
+            eprintln!("Checking for latest release...");
+        }
+        let (tag, download_url, sha256_url) = fetch_release(target_version.as_deref())?;
         let remote_version = tag.strip_prefix('v').unwrap_or(&tag);
 
-        eprintln!("Latest release: {} ({})", tag, asset_name());
+        eprintln!("Release: {} ({})", tag, asset_name());
 
         if remote_version == current_version {
             eprintln!("✅ Already running the latest version");
