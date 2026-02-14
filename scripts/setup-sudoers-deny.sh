@@ -35,6 +35,32 @@ openclaw ALL=(ALL) !/usr/bin/rm /usr/local/bin/clawav, \
 openclaw ALL=(ALL) !/usr/bin/kill, \
                     !/usr/bin/killall clawav, \
                     !/usr/bin/pkill clawav
+
+# Block getting a root shell (prevents sudo su / sudo -i / sudo bash escape)
+openclaw ALL=(ALL) !/usr/bin/su, \
+                    !/usr/bin/su -, \
+                    !/usr/bin/su root, \
+                    !/usr/bin/su - root, \
+                    !/usr/sbin/su, \
+                    !/usr/bin/bash, \
+                    !/usr/bin/sh, \
+                    !/usr/bin/zsh, \
+                    !/usr/bin/dash, \
+                    !/usr/bin/fish, \
+                    !/usr/bin/env bash, \
+                    !/usr/bin/env sh
+
+# Block sudo flags that give interactive root shells
+openclaw ALL=(ALL) !/usr/bin/sudo -i, \
+                    !/usr/bin/sudo -s, \
+                    !/usr/bin/sudo su, \
+                    !/usr/bin/sudo su -, \
+                    !/usr/bin/sudo -u root /usr/bin/bash, \
+                    !/usr/bin/sudo -u root /usr/bin/sh
+
+# Block editing sudoers (prevent removing these rules)
+openclaw ALL=(ALL) !/usr/sbin/visudo, \
+                    !/usr/bin/sudoedit
 EOF
 
 chmod 440 "$DENY_FILE"
