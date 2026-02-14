@@ -149,6 +149,15 @@ chmod 755 /usr/local/bin/clawav /usr/local/bin/clawsudo
 # Install config (don't overwrite existing)
 if [[ ! -f /etc/clawav/config.toml ]]; then
     [[ -f "$TMPDIR/config.toml" ]] && cp "$TMPDIR/config.toml" /etc/clawav/config.toml
+    # Auto-detect the calling user (the human who ran sudo, not root)
+    CALLING_USER="${SUDO_USER:-}"
+    if [[ -n "$CALLING_USER" ]]; then
+        CALLING_UID=$(id -u "$CALLING_USER" 2>/dev/null || echo "")
+        if [[ -n "$CALLING_UID" ]]; then
+            log "Auto-detected user: $CALLING_USER (UID $CALLING_UID)"
+            sed -i "s/^watched_user = .*/watched_user = \"$CALLING_UID\"/" /etc/clawav/config.toml 2>/dev/null || true
+        fi
+    fi
 fi
 
 # Install policies (don't overwrite existing)
@@ -194,10 +203,10 @@ echo -e "${YELLOW}${BOLD}══════════════════�
 echo -e "${YELLOW}${BOLD}  ⚙️   CONFIGURATION                                           ${NC}"
 echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  You ${BOLD}must${NC} configure these before proceeding:"
+echo -e "  Review your configuration before locking down."
 echo ""
-echo -e "  ${BOLD}watched_user${NC}        — UID of the AI agent user (run 'id <username>')"
-echo -e "  ${BOLD}slack_webhook_url${NC}   — Independent Slack webhook for alerts"
+echo -e "  ${BOLD}watched_user${NC}        — Auto-detected from current user (change if needed)"
+echo -e "  ${BOLD}slack_webhook_url${NC}   — Optional: Slack webhook for independent alerts"
 echo ""
 echo -e "  Config file: ${BOLD}/etc/clawav/config.toml${NC}"
 echo ""
@@ -212,17 +221,13 @@ wait_for_enter "Press ENTER to open the config editor ($EDITOR_CMD)..."
 
 echo ""
 
-# Validate minimum config
+# Info about Slack (optional)
 CONF="/etc/clawav/config.toml"
 if grep -q 'webhook_url = "https://hooks.slack.com/...' "$CONF" 2>/dev/null || \
    grep -q 'webhook_url = ""' "$CONF" 2>/dev/null; then
-    echo -e "${RED}${BOLD}  ⚠️  slack webhook_url looks unconfigured!${NC}"
-    if ! confirm "  Continue anyway? Alerts won't reach you. [y/n]"; then
-        echo ""
-        echo "  Edit again with: sudo nano /etc/clawav/config.toml"
-        echo "  Then re-run this installer."
-        exit 1
-    fi
+    echo -e "${YELLOW}  ℹ️  Slack webhook not configured — alerts will go to logs only.${NC}"
+    echo -e "${YELLOW}     You can add a webhook later by editing /etc/clawav/config.toml${NC}"
+    echo ""
 fi
 
 if ! confirm "Configuration done? Ready to lock down? [y/n]"; then

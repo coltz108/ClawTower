@@ -16,7 +16,7 @@ curl -sSL https://raw.githubusercontent.com/coltz108/ClawAV/main/scripts/oneshot
 
 Supports **x86_64** and **aarch64** (Raspberry Pi, ARM servers). Downloads pre-built binaries from [GitHub Releases](https://github.com/coltz108/ClawAV/releases).
 
-After install, configure ClawAV before starting the service:
+After install, the installer auto-detects your user and opens the config for review. You can also edit later:
 
 ```bash
 sudo nano /etc/clawav/config.toml
@@ -24,12 +24,12 @@ sudo nano /etc/clawav/config.toml
 
 ```toml
 [general]
-watched_user = "1000"              # UID to monitor (run `id <username>` to find it)
-watched_users = ["1000", "1001"]   # Monitor multiple users
+watched_user = "1000"              # Auto-detected during install
+watched_users = ["1000", "1001"]   # Monitor additional users
 watch_all_users = false            # Monitor ALL users
 
 [slack]
-webhook_url = "https://hooks.slack.com/..."    # REQUIRED — independent alert channel
+webhook_url = "https://hooks.slack.com/..."    # Optional — independent alert channel
 backup_webhook_url = "https://hooks.slack.com/..."
 channel = "#devops"
 min_slack_level = "warning"
