@@ -4,11 +4,23 @@
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/coltz108/ClawAV/main/scripts/oneshot-install.sh | sudo bash
 #   curl -sSL https://raw.githubusercontent.com/coltz108/ClawAV/main/scripts/oneshot-install.sh | sudo bash -s -- --version v0.1.0
+#   curl -sSL https://raw.githubusercontent.com/coltz108/ClawAV/main/scripts/oneshot-install.sh | sudo bash -s -- --update
 #
 set -euo pipefail
 
 REPO="coltz108/ClawAV"
-VERSION="${1:-latest}"
+VERSION="latest"
+MODE="install"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --update)   MODE="update"; shift ;;
+        --version)  VERSION="$2"; shift 2 ;;
+        -*)         echo "Unknown flag: $1" >&2; exit 1 ;;
+        *)          VERSION="$1"; shift ;;
+    esac
+done
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,6 +53,139 @@ wait_for_enter() {
 }
 
 [[ $EUID -eq 0 ]] || die "Must run as root (pipe to sudo bash, or run with sudo)"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UPDATE MODE
+# ═══════════════════════════════════════════════════════════════════════════════
+if [[ "$MODE" == "update" ]]; then
+    echo ""
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  🔄  ClawAV Update                                            ${NC}"
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # Verify ClawAV is installed
+    [[ -f /usr/local/bin/clawav ]] || die "ClawAV not installed. Run without --update for fresh install."
+    [[ -f /etc/clawav/config.toml ]] || die "No config found at /etc/clawav/config.toml"
+
+    CURRENT_VERSION=$(/usr/local/bin/clawav --version 2>/dev/null || echo "unknown")
+    log "Current version: $CURRENT_VERSION"
+
+    # Admin key verification
+    echo ""
+    echo -en "  ${CYAN}Enter your admin key (OCAV-...): ${NC}" > /dev/tty
+    read -r ADMIN_KEY < /dev/tty
+    [[ -n "$ADMIN_KEY" ]] || die "Admin key required for updates"
+
+    # Verify admin key against stored hash
+    if [[ -f /etc/clawav/admin.key.hash ]]; then
+        STORED_HASH=$(cat /etc/clawav/admin.key.hash 2>/dev/null || true)
+        INPUT_HASH=$(echo -n "$ADMIN_KEY" | sha256sum | awk '{print $1}')
+        if [[ "$STORED_HASH" != "$INPUT_HASH" && ! "$STORED_HASH" =~ "$INPUT_HASH" ]]; then
+            die "Invalid admin key"
+        fi
+        log "✓ Admin key verified"
+    else
+        warn "No admin key hash found — cannot verify key. Proceeding anyway."
+        if ! confirm "Continue without key verification? [y/n]"; then
+            exit 1
+        fi
+    fi
+
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64)   ARCH_LABEL="x86_64" ;;
+        aarch64|arm64)   ARCH_LABEL="aarch64" ;;
+        *)               die "Unsupported architecture: $ARCH" ;;
+    esac
+
+    # Resolve version
+    if [[ "$VERSION" == "latest" ]]; then
+        log "Fetching latest release..."
+        VERSION=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+        [[ -n "$VERSION" ]] || die "Could not determine latest version"
+    fi
+    log "Updating to ClawAV $VERSION"
+
+    # Download new binaries to temp
+    TMPDIR=$(mktemp -d)
+    trap 'rm -rf "$TMPDIR"' EXIT
+
+    BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+    log "Downloading clawav..."
+    curl -sSL -f -o "$TMPDIR/clawav" "$BASE_URL/clawav-${ARCH_LABEL}-linux" || die "Download failed: $BASE_URL/clawav-${ARCH_LABEL}-linux"
+    log "Downloading clawsudo..."
+    curl -sSL -f -o "$TMPDIR/clawsudo" "$BASE_URL/clawsudo-${ARCH_LABEL}-linux" || die "Download failed"
+    chmod +x "$TMPDIR/clawav" "$TMPDIR/clawsudo"
+
+    # Download updated policies (don't overwrite custom ones)
+    log "Downloading updated policies..."
+    mkdir -p "$TMPDIR/policies"
+    curl -sSL -f -o "$TMPDIR/policies/default.yaml" "https://raw.githubusercontent.com/$REPO/$VERSION/policies/default.yaml" 2>/dev/null || true
+
+    # Download updated SecureClaw patterns
+    log "Downloading SecureClaw patterns..."
+    SECURECLAW_BASE="https://raw.githubusercontent.com/adversa-ai/secureclaw/main/secureclaw/skill/configs"
+    mkdir -p "$TMPDIR/secureclaw"
+    for pattern in injection-patterns.json dangerous-commands.json privacy-rules.json supply-chain-ioc.json; do
+        curl -sSL -f -o "$TMPDIR/secureclaw/$pattern" "$SECURECLAW_BASE/$pattern" 2>/dev/null && \
+            log "  ✓ $pattern" || warn "  ✗ $pattern (non-fatal)"
+    done
+
+    # Stop service
+    log "Stopping ClawAV service..."
+    systemctl stop clawav 2>/dev/null || true
+    sleep 1
+
+    # Remove immutable flags
+    log "Removing immutable flags..."
+    chattr -i /usr/local/bin/clawav 2>/dev/null || true
+    chattr -i /usr/local/bin/clawsudo 2>/dev/null || true
+
+    # Replace binaries
+    log "Installing new binaries..."
+    cp "$TMPDIR/clawav" /usr/local/bin/clawav
+    cp "$TMPDIR/clawsudo" /usr/local/bin/clawsudo
+    chmod 755 /usr/local/bin/clawav /usr/local/bin/clawsudo
+
+    # Update SecureClaw patterns (always overwrite — these are upstream)
+    for f in "$TMPDIR"/secureclaw/*.json; do
+        [[ -f "$f" ]] && cp "$f" "/etc/clawav/secureclaw/"
+    done
+
+    # Update default policy (only if user hasn't modified it)
+    if [[ -f "$TMPDIR/policies/default.yaml" ]]; then
+        cp "$TMPDIR/policies/default.yaml" "/etc/clawav/policies/default.yaml"
+        log "Updated default policy"
+    fi
+
+    # Re-set immutable flags
+    log "Re-setting immutable flags..."
+    chattr +i /usr/local/bin/clawav
+    chattr +i /usr/local/bin/clawsudo
+
+    # Restart service
+    log "Starting ClawAV..."
+    systemctl start clawav
+    sleep 2
+
+    if systemctl is-active --quiet clawav; then
+        NEW_VERSION=$(/usr/local/bin/clawav --version 2>/dev/null || echo "$VERSION")
+        echo ""
+        echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}${BOLD}  ✅  ClawAV updated: $CURRENT_VERSION → $NEW_VERSION         ${NC}"
+        echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  ${BOLD}Status:${NC}  systemctl status clawav"
+        echo -e "  ${BOLD}Logs:${NC}    journalctl -u clawav -f"
+        echo ""
+    else
+        die "ClawAV failed to start after update — check: journalctl -u clawav -n 50"
+    fi
+
+    exit 0
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 1: DOWNLOAD
