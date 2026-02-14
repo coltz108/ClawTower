@@ -211,13 +211,15 @@ echo ""
 echo -e "  Config file: ${BOLD}/etc/clawav/config.toml${NC}"
 echo ""
 
-EDITOR_CMD="${EDITOR:-nano}"
-if ! command -v "$EDITOR_CMD" &>/dev/null; then
-    EDITOR_CMD="vi"
-fi
+# Auto-detect editor
+EDITOR_CMD=""
+for cmd in "${EDITOR:-}" nano vim vi; do
+    [[ -n "$cmd" ]] && command -v "$cmd" &>/dev/null && { EDITOR_CMD="$cmd"; break; }
+done
+[[ -z "$EDITOR_CMD" ]] && die "No text editor found. Install nano or vim."
 
 wait_for_enter "Press ENTER to open the config editor ($EDITOR_CMD)..."
-"$EDITOR_CMD" /etc/clawav/config.toml
+"$EDITOR_CMD" /etc/clawav/config.toml < /dev/tty > /dev/tty
 
 echo ""
 
