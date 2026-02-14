@@ -41,6 +41,7 @@ JSON API on LAN (:18791)                              TUI dashboard
 | **network monitor** | `src/network.rs`, `src/journald.rs` | Parses iptables log lines from syslog or journald |
 | **Falco** | `src/falco.rs` | Tails Falco JSON output for eBPF behavioral alerts |
 | **Samhain** | `src/samhain.rs` | Tails Samhain file integrity monitoring logs |
+| **SecureClaw** | `src/secureclaw.rs` | Modular pattern databases for prompt injection, dangerous commands, privacy violations, and supply chain attacks |
 
 **5,535 lines of Rust/C. 100 tests.**
 
@@ -236,10 +237,40 @@ port = 18791
 [scans]
 interval = 3600                # Seconds between periodic scans
 
+[secureclaw]
+enabled = false                # Enable SecureClaw pattern databases
+vendor_dir = "./vendor/secureclaw/secureclaw/skill/configs"  # Path to pattern files
+
 [policy]
 enabled = true
 dir = "./policies"
 ```
+
+## SecureClaw Integration
+
+OpenClawAV integrates with [SecureClaw](https://github.com/adversa-ai/secureclaw) pattern databases to enhance detection capabilities:
+
+- **Prompt injection patterns** - 70+ regex patterns across 7 categories
+- **Dangerous commands** - Command patterns with severity levels and actions
+- **Privacy rules** - PII detection with configurable actions (block/warn/rewrite)
+- **Supply chain IOCs** - Indicators of compromise for malicious packages/skills
+
+### Setup
+
+```bash
+# Add as git submodule (already done if you cloned after integration)
+git submodule add https://github.com/adversa-ai/secureclaw.git vendor/secureclaw
+git submodule update --init
+
+# Enable in config.toml
+[secureclaw]
+enabled = true
+
+# Sync patterns (run weekly)
+./scripts/sync-secureclaw.sh
+```
+
+The security scanner checks if SecureClaw patterns are >7 days old and warns accordingly.
 
 ## Testing
 
