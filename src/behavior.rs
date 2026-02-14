@@ -831,4 +831,55 @@ mod tests {
         let result = classify_behavior(&event);
         assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
     }
+
+    // --- LD_PRELOAD Bypass Detection ---
+
+    #[test]
+    fn test_modify_ld_preload_file() {
+        let event = make_exec_event(&["vim", "/etc/ld.so.preload"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_set_ld_preload_env() {
+        let event = make_exec_event(&["env", "LD_PRELOAD=/tmp/evil.so", "bash"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_direct_linker_invocation() {
+        let event = make_exec_event(&["ld-linux-aarch64.so.1", "--preload", "/tmp/evil.so", "/usr/bin/curl"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_static_compilation() {
+        let event = make_exec_event(&["gcc", "-static", "-o", "bypass", "bypass.c"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Warning)));
+    }
+
+    #[test]
+    fn test_gdb_debugger() {
+        let event = make_exec_event(&["gdb", "-p", "1234"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_strace_bypass() {
+        let event = make_exec_event(&["strace", "-f", "-p", "1234"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_musl_static_compile() {
+        let event = make_exec_event(&["musl-gcc", "-o", "static-binary", "evil.c"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Warning)));
+    }
 }
