@@ -25,7 +25,7 @@ JSON API on LAN (:18791)                              TUI dashboard
 | Module | File | Description |
 |--------|------|-------------|
 | **auditd parser** | `src/auditd.rs` | Tails `/var/log/audit/audit.log`, parses EXECVE/SYSCALL records, decodes hex args, maps aarch64 syscall numbers |
-| **behavior engine** | `src/behavior.rs` | Hardcoded rules classifying events as DATA_EXFIL, PRIV_ESC, SEC_TAMPER, or RECON |
+| **behavior engine** | `src/behavior.rs` | Hardcoded rules classifying events as DATA_EXFIL, PRIV_ESC, SEC_TAMPER, RECON, or SIDE_CHAN |
 | **policy engine** | `src/policy.rs` | YAML-driven rule engine with command, command_contains, file_access, and exclude_args matchers |
 | **aggregator** | `src/aggregator.rs` | Deduplication (30s window) and per-source rate limiting (20/min). Critical alerts always pass. |
 | **audit chain** | `src/audit_chain.rs` | SHA-256 hash-chained append-only log. Each entry includes hash of previous entry. |
@@ -34,7 +34,7 @@ JSON API on LAN (:18791)                              TUI dashboard
 | **Slack notifier** | `src/slack.rs` | Independent webhook with primary/backup failover |
 | **API server** | `src/api.rs` | JSON API on port 18791 — status, alerts, security posture |
 | **TUI dashboard** | `src/tui.rs` | Ratatui terminal UI with 5 tabs: Alerts, Network, Falco, FIM, System |
-| **scanner** | `src/scanner.rs` | Periodic checks: firewall, auditd, integrity, updates, SSH, listeners, disk |
+| **scanner** | `src/scanner.rs` | Periodic checks: firewall, auditd, integrity, updates, SSH, listeners, disk, side-channel mitigations, SecureClaw sync |
 | **admin socket** | `src/admin.rs` | Unix socket with Argon2-hashed key auth, rate limiting (3 failures = 1hr lockout) |
 | **proxy** | `src/proxy.rs` | Transparent LLM API proxy with virtual→real key mapping and DLP scanning |
 | **firewall monitor** | `src/firewall.rs` | Polls UFW every 30s, alerts on any rule change or disablement |
@@ -43,7 +43,7 @@ JSON API on LAN (:18791)                              TUI dashboard
 | **Samhain** | `src/samhain.rs` | Tails Samhain file integrity monitoring logs |
 | **SecureClaw** | `src/secureclaw.rs` | Modular pattern databases for prompt injection, dangerous commands, privacy violations, and supply chain attacks |
 
-**5,535 lines of Rust/C. 100 tests.**
+**6,400 lines of Rust/C. 109 tests.**
 
 ## Quick Start
 
@@ -201,7 +201,9 @@ See [docs/API.md](docs/API.md) for examples.
 
 ```toml
 [general]
-watched_user = "1000"          # UID of the monitored user
+watched_user = "1000"          # UID of the monitored user (backward compat)
+watched_users = ["1000", "1001"]  # Monitor multiple users
+watch_all_users = false        # Set true to monitor ALL users
 min_alert_level = "warning"
 log_file = "/var/log/openclawav/watchdog.log"
 
@@ -296,14 +298,15 @@ cargo test
 | Agent tampers with audit trail | Hash chain makes modifications detectable |
 | Agent compromises Slack integration | OpenClawAV uses its own independent webhook |
 | PII/secrets leaked via LLM API | DLP proxy scans outbound requests (SSN, credit cards, AWS keys) |
+| Side-channel attacks (Spectre, Meltdown) | Kernel mitigation scanner + side-channel tool detection + perf_event_open monitoring |
+| Attacks targeting other system users | Multi-user monitoring (`watched_users` list or `watch_all_users = true`) |
+| Prompt injection / supply chain attacks | SecureClaw pattern databases (70+ injection patterns, supply chain IOCs) |
 
 ### What it does NOT protect against
 
 - **Physical access** — by design, physical access is the recovery path
 - **Kernel exploits** — a kernel 0-day could bypass all userspace protections
 - **Pre-installation compromise** — OpenClawAV must be installed from a trusted state
-- **Side-channel attacks** — no defense against timing/cache attacks
-- **Attacks on other users** — only monitors the configured `watched_user`
 
 ## License
 

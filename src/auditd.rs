@@ -324,10 +324,9 @@ pub async fn tail_audit_log_with_behavior_and_policy(
                             let matches = engine.check_command(command);
                             for pattern_match in matches {
                                 let severity = match pattern_match.severity.as_str() {
-                                    "critical" => Severity::Critical,
-                                    "high" => Severity::High,
-                                    "medium" => Severity::Medium,
-                                    _ => Severity::Low,
+                                    "critical" | "high" => Severity::Critical,
+                                    "medium" => Severity::Warning,
+                                    _ => Severity::Info,
                                 };
                                 let msg = format!(
                                     "[SECURECLAW:{}:{}] {} — {}",
