@@ -468,6 +468,154 @@ echo -e "${RED}${BOLD}  🔒  LOCKING DOWN — THIS IS IRREVERSIBLE WITHOUT RECO
 echo -e "${RED}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
+# ── Create human admin account ────────────────────────────────────────────────
+echo -e "  ${BOLD}Human Admin Account${NC}"
+echo ""
+echo -e "  ClawAV locks down the agent's user account (UID $WATCH_UID) so it"
+echo -e "  cannot disable, modify, or bypass the watchdog."
+echo ""
+echo -e "  ${YELLOW}You need a separate human admin account${NC} to manage the system."
+echo -e "  This account has full sudo access — no restrictions."
+echo -e "  The agent cannot access or impersonate this account."
+echo ""
+
+AGENT_USERNAME=$(getent passwd "$WATCH_UID" | cut -d: -f1 || echo "")
+ADMIN_USERNAME=""
+
+echo -en "  ${CYAN}Create a human admin account? [Y/n]: ${NC}" > /dev/tty
+read -r create_admin < /dev/tty
+
+if [[ ! "$create_admin" =~ ^[nN] ]]; then
+    echo -en "  ${CYAN}Username for admin account: ${NC}" > /dev/tty
+    read -r ADMIN_USERNAME < /dev/tty
+    [[ -n "$ADMIN_USERNAME" ]] || { warn "No username provided — skipping admin account"; ADMIN_USERNAME=""; }
+
+    if [[ -n "$ADMIN_USERNAME" ]]; then
+        if id "$ADMIN_USERNAME" &>/dev/null; then
+            log "User '$ADMIN_USERNAME' already exists — adding to sudo group"
+            usermod -aG sudo "$ADMIN_USERNAME" 2>/dev/null || true
+        else
+            log "Creating user '$ADMIN_USERNAME'..."
+            useradd -m -s /bin/bash -G sudo "$ADMIN_USERNAME"
+        fi
+
+        # Set password
+        echo ""
+        echo -e "  ${BOLD}Set a password for '${ADMIN_USERNAME}':${NC}" > /dev/tty
+        passwd "$ADMIN_USERNAME" < /dev/tty
+
+        # Give full NOPASSWD sudo
+        cat > "/etc/sudoers.d/$ADMIN_USERNAME" << SUDOEOF
+# ClawAV: Human admin account — full unrestricted sudo access
+$ADMIN_USERNAME ALL=(ALL:ALL) NOPASSWD: ALL
+SUDOEOF
+        chmod 440 "/etc/sudoers.d/$ADMIN_USERNAME"
+
+        # Copy SSH authorized_keys from agent user if they exist
+        if [[ -n "$AGENT_USERNAME" && -f "/home/$AGENT_USERNAME/.ssh/authorized_keys" ]]; then
+            mkdir -p "/home/$ADMIN_USERNAME/.ssh"
+            cp "/home/$AGENT_USERNAME/.ssh/authorized_keys" "/home/$ADMIN_USERNAME/.ssh/authorized_keys"
+            chown -R "$ADMIN_USERNAME:$ADMIN_USERNAME" "/home/$ADMIN_USERNAME/.ssh"
+            chmod 700 "/home/$ADMIN_USERNAME/.ssh"
+            chmod 600 "/home/$ADMIN_USERNAME/.ssh/authorized_keys"
+            log "Copied SSH keys from $AGENT_USERNAME → $ADMIN_USERNAME"
+        fi
+
+        echo ""
+        log "✓ Admin account '$ADMIN_USERNAME' created with full sudo access"
+        echo -e "  ${YELLOW}Use this account for system administration.${NC}"
+        echo -e "  ${YELLOW}SSH in as: ssh ${ADMIN_USERNAME}@$(hostname)${NC}"
+        echo ""
+    fi
+fi
+
+# ── Install sudoers deny for agent ────────────────────────────────────────────
+if [[ -n "$AGENT_USERNAME" ]]; then
+    log "Locking down agent account '$AGENT_USERNAME'..."
+    DENY_FILE="/etc/sudoers.d/clawav-deny"
+    cat > "$DENY_FILE" << DENYEOF
+# ClawAV: Deny agent user from disabling the watchdog
+# This file is immutable (chattr +i) — requires admin key to modify
+
+# Block stopping/disabling ClawAV service
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/systemctl stop clawav, \\
+                    !/usr/bin/systemctl stop clawav.service, \\
+                    !/usr/bin/systemctl disable clawav, \\
+                    !/usr/bin/systemctl disable clawav.service, \\
+                    !/usr/bin/systemctl mask clawav, \\
+                    !/usr/bin/systemctl mask clawav.service
+
+# Block modifying ClawAV binary and config
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/chattr * /usr/local/bin/clawav, \\
+                    !/usr/bin/chattr * /etc/clawav/*, \\
+                    !/usr/bin/chattr * /etc/systemd/system/clawav.service
+
+# Block removing/replacing ClawAV files
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/rm /usr/local/bin/clawav, \\
+                    !/usr/bin/rm -f /usr/local/bin/clawav, \\
+                    !/usr/bin/rm -rf /etc/clawav, \\
+                    !/usr/bin/rm -rf /etc/clawav/*, \\
+                    !/usr/bin/mv /usr/local/bin/clawav *, \\
+                    !/usr/bin/cp * /usr/local/bin/clawav, \\
+                    !/usr/bin/install * /usr/local/bin/clawav
+
+# Block killing ClawAV process directly
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/kill, \\
+                    !/usr/bin/killall clawav, \\
+                    !/usr/bin/pkill clawav
+
+# Block getting a root shell (prevents sudo su / sudo bash escape)
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/su, \\
+                    !/usr/bin/su -, \\
+                    !/usr/bin/su root, \\
+                    !/usr/bin/su - root, \\
+                    !/usr/sbin/su, \\
+                    !/usr/bin/bash, \\
+                    !/usr/bin/sh, \\
+                    !/usr/bin/zsh, \\
+                    !/usr/bin/dash, \\
+                    !/usr/bin/fish, \\
+                    !/usr/bin/env bash, \\
+                    !/usr/bin/env sh
+
+# Block sudo flags that give interactive root shells
+$AGENT_USERNAME ALL=(ALL) !/usr/bin/sudo -i, \\
+                    !/usr/bin/sudo -s, \\
+                    !/usr/bin/sudo su, \\
+                    !/usr/bin/sudo su -, \\
+                    !/usr/bin/sudo -u root /usr/bin/bash, \\
+                    !/usr/bin/sudo -u root /usr/bin/sh
+
+# Block editing sudoers (prevent removing these rules)
+$AGENT_USERNAME ALL=(ALL) !/usr/sbin/visudo, \\
+                    !/usr/bin/sudoedit
+DENYEOF
+
+    chmod 440 "$DENY_FILE"
+    if visudo -cf "$DENY_FILE"; then
+        chattr +i "$DENY_FILE"
+        log "✓ Agent account locked down — cannot disable ClawAV or get root shell"
+    else
+        rm -f "$DENY_FILE"
+        warn "Sudoers deny file had syntax errors — removed. Agent not locked down."
+    fi
+fi
+
+# ── Install auditd tamper detection rules ─────────────────────────────────────
+if command -v auditctl &>/dev/null; then
+    log "Installing auditd tamper detection rules..."
+    cat > /etc/audit/rules.d/clawav.rules << 'AUDITRULES'
+# ClawAV tamper detection rules
+-w /usr/local/bin/clawav -p a -k clawav-tamper
+-w /etc/clawav/ -p wa -k clawav-config
+-w /etc/systemd/system/clawav.service -p wa -k clawav-tamper
+-w /etc/sudoers.d/clawav-deny -p wa -k clawav-tamper
+-w /etc/apparmor.d/clawav.deny-agent -p wa -k clawav-tamper
+AUDITRULES
+    augenrules --load 2>/dev/null || auditctl -R /etc/audit/rules.d/clawav.rules 2>/dev/null || true
+    log "✓ Auditd tamper detection active"
+fi
+
 # ── Create system user ────────────────────────────────────────────────────────
 if ! id -u clawav &>/dev/null; then
     log "Creating clawav system user..."
