@@ -443,6 +443,24 @@ impl Default for SentinelConfig {
                     patterns: vec!["*".to_string()],
                     policy: WatchPolicy::Protected,
                 },
+                // Session metadata monitoring
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/agents/main/sessions/sessions.json".to_string(),
+                    patterns: vec!["*".to_string()],
+                    policy: WatchPolicy::Watched,
+                },
+                // WhatsApp credential theft detection
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/credentials/whatsapp".to_string(),
+                    patterns: vec!["creds.json".to_string()],
+                    policy: WatchPolicy::Protected,
+                },
+                // Pairing allowlist changes
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/credentials".to_string(),
+                    patterns: vec!["*-allowFrom.json".to_string()],
+                    policy: WatchPolicy::Watched,
+                },
             ],
             quarantine_dir: default_quarantine_dir(),
             shadow_dir: default_shadow_dir(),
@@ -556,5 +574,16 @@ mod tests {
             "Should watch OpenClaw config file");
         assert!(paths.iter().any(|p| p.contains("auth-profiles.json")),
             "Should watch auth profiles");
+    }
+
+    #[test]
+    fn test_default_sentinel_includes_openclaw_session_and_whatsapp() {
+        let config = SentinelConfig::default();
+        let paths: Vec<&str> = config.watch_paths.iter()
+            .map(|w| w.path.as_str()).collect();
+        assert!(paths.iter().any(|p| p.contains("sessions/sessions.json")),
+            "Should watch session metadata");
+        assert!(paths.iter().any(|p| p.contains("credentials/whatsapp")),
+            "Should watch WhatsApp credentials");
     }
 }
