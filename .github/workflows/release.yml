@@ -37,16 +37,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Build
+      - name: Install D-Bus dev libs (for tray feature)
+        run: |
+          sudo apt-get update
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            sudo apt-get install -y libdbus-1-dev:arm64 pkg-config || true
+          else
+            sudo apt-get install -y libdbus-1-dev pkg-config
+          fi
+
+      - name: Build (default features)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build tray binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_SYSROOT_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/aarch64-linux-gnu' || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
+        run: cargo build --release --target ${{ matrix.target }} --features tray --bin clawav-tray || echo "::warning::Tray build failed (optional)"
 
       - name: Package binaries
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/clawav dist/${{ matrix.artifact }}
           cp target/${{ matrix.target }}/release/clawsudo dist/clawsudo-${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64' || 'x86_64' }}-linux
+          # Tray binary is optional — only include if it built
+          if [[ -f target/${{ matrix.target }}/release/clawav-tray ]]; then
+            cp target/${{ matrix.target }}/release/clawav-tray dist/clawav-tray-${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64' || 'x86_64' }}-linux
+          fi
           chmod +x dist/*
 
       - name: Generate checksums

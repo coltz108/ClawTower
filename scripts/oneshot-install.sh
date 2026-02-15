@@ -142,12 +142,28 @@ if [[ "$MODE" == "update" ]]; then
     log "Removing immutable flags..."
     chattr -i /usr/local/bin/clawav 2>/dev/null || true
     chattr -i /usr/local/bin/clawsudo 2>/dev/null || true
+    chattr -i /usr/local/bin/clawav-tray 2>/dev/null || true
+    chattr -i /etc/clawav/admin.key.hash 2>/dev/null || true
 
     # Replace binaries
     log "Installing new binaries..."
     cp "$TMPDIR/clawav" /usr/local/bin/clawav
     cp "$TMPDIR/clawsudo" /usr/local/bin/clawsudo
     chmod 755 /usr/local/bin/clawav /usr/local/bin/clawsudo
+
+    # Update tray binary if it exists in the release and is installed locally
+    TRAY_ARTIFACT="clawav-tray-${ARCH_LABEL}-linux"
+    if [[ -f /usr/local/bin/clawav-tray ]]; then
+        log "Updating tray binary..."
+        if curl -sSL -f -o "$TMPDIR/clawav-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
+            chmod +x "$TMPDIR/clawav-tray"
+            cp "$TMPDIR/clawav-tray" /usr/local/bin/clawav-tray
+            chmod 755 /usr/local/bin/clawav-tray
+            log "✓ Tray binary updated"
+        else
+            warn "Tray binary not available in this release — keeping existing"
+        fi
+    fi
 
     # Update SecureClaw patterns (always overwrite — these are upstream)
     for f in "$TMPDIR"/secureclaw/*.json; do
@@ -164,6 +180,8 @@ if [[ "$MODE" == "update" ]]; then
     log "Re-setting immutable flags..."
     chattr +i /usr/local/bin/clawav
     chattr +i /usr/local/bin/clawsudo
+    [[ -f /usr/local/bin/clawav-tray ]] && chattr +i /usr/local/bin/clawav-tray
+    [[ -f /etc/clawav/admin.key.hash ]] && chattr +i /etc/clawav/admin.key.hash
 
     # Restart service
     log "Starting ClawAV..."
@@ -307,6 +325,62 @@ log "Installing binaries to /usr/local/bin/..."
 cp "$TMPDIR/clawav" /usr/local/bin/clawav
 cp "$TMPDIR/clawsudo" /usr/local/bin/clawsudo
 chmod 755 /usr/local/bin/clawav /usr/local/bin/clawsudo
+
+# ── Detect display server and install tray binary ─────────────────────────────
+DISPLAY_SERVER="headless"
+CALLING_USER="${SUDO_USER:-$(whoami)}"
+CALLING_HOME=$(eval echo "~$CALLING_USER")
+
+# Check for Wayland
+if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    DISPLAY_SERVER="wayland"
+elif su -s /bin/sh "$CALLING_USER" -c 'echo $WAYLAND_DISPLAY' 2>/dev/null | grep -q .; then
+    DISPLAY_SERVER="wayland"
+elif loginctl show-session "$(loginctl list-sessions --no-legend 2>/dev/null | grep "$CALLING_USER" | awk '{print $1}' | head -1)" -p Type 2>/dev/null | grep -qi wayland; then
+    DISPLAY_SERVER="wayland"
+# Check for X11
+elif [[ -n "${DISPLAY:-}" ]]; then
+    DISPLAY_SERVER="x11"
+elif su -s /bin/sh "$CALLING_USER" -c 'echo $DISPLAY' 2>/dev/null | grep -q .; then
+    DISPLAY_SERVER="x11"
+fi
+
+log "Detected display server: $DISPLAY_SERVER"
+
+if [[ "$DISPLAY_SERVER" != "headless" ]]; then
+    TRAY_ARTIFACT="clawav-tray-${ARCH_LABEL}-linux"
+    log "Downloading tray binary ($DISPLAY_SERVER detected)..."
+    if curl -sSL -f -o "$TMPDIR/clawav-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
+        chmod +x "$TMPDIR/clawav-tray"
+        chattr -i /usr/local/bin/clawav-tray 2>/dev/null || true
+        cp "$TMPDIR/clawav-tray" /usr/local/bin/clawav-tray
+        chmod 755 /usr/local/bin/clawav-tray
+        log "✓ Tray binary installed"
+
+        # Create autostart desktop entry
+        AUTOSTART_DIR="$CALLING_HOME/.config/autostart"
+        mkdir -p "$AUTOSTART_DIR"
+        cat > "$AUTOSTART_DIR/clawav-tray.desktop" <<TRAYEOF
+[Desktop Entry]
+Type=Application
+Name=ClawAV Tray
+Exec=/usr/local/bin/clawav-tray
+Icon=security-high
+Comment=ClawAV security watchdog tray icon
+X-GNOME-Autostart-enabled=true
+TRAYEOF
+        chown "$CALLING_USER:$(id -gn "$CALLING_USER")" "$AUTOSTART_DIR/clawav-tray.desktop"
+        log "✓ Tray autostart entry created"
+
+        if [[ "$DISPLAY_SERVER" == "x11" ]]; then
+            warn "X11 detected — tray uses D-Bus StatusNotifierItem. You may need snixembed or similar SNI bridge."
+        fi
+    else
+        warn "Tray binary not available in this release — skipping (non-fatal)"
+    fi
+else
+    log "Headless system — skipping tray binary"
+fi
 
 # Install config (don't overwrite existing)
 if [[ ! -f /etc/clawav/config.toml ]]; then
