@@ -66,12 +66,37 @@ pub fn new_shared_scan_results() -> SharedScanResults {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(cmd)
+fn run_cmd_timeout(cmd: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
+    let mut child = Command::new(cmd)
         .args(args)
-        .output()
-        .map_err(|e| format!("Failed to run {} {:?}: {}", cmd, args, e))?;
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let output = child.wait_with_output()
+                    .map_err(|e| format!("Failed to get output: {}", e))?;
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+            Ok(None) => {
+                if start.elapsed().as_secs() > timeout_secs {
+                    let _ = child.kill();
+                    return Err(format!("{} timed out after {}s", cmd, timeout_secs));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("Error waiting for {}: {}", cmd, e)),
+        }
+    }
+}
+
+const DEFAULT_CMD_TIMEOUT: u64 = 30;
+
+fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
+    run_cmd_timeout(cmd, args, DEFAULT_CMD_TIMEOUT)
 }
 
 fn run_cmd_with_sudo(cmd: &str, args: &[&str]) -> Result<String, String> {
