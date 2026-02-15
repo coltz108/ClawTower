@@ -111,9 +111,15 @@ fn run_cmd_timeout(cmd: &str, args: &[&str], timeout_secs: u64) -> Result<String
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {
-                let output = child.wait_with_output()
-                    .map_err(|e| format!("Failed to get output: {}", e))?;
-                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+                // Read stdout directly from the pipe before wait_with_output
+                // (wait_with_output after try_wait can lose buffered data)
+                let mut stdout_str = String::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    use std::io::Read;
+                    let _ = stdout.read_to_string(&mut stdout_str);
+                }
+                let _ = child.wait(); // reap the process
+                return Ok(stdout_str);
             }
             Ok(None) => {
                 if start.elapsed().as_secs() > timeout_secs {
