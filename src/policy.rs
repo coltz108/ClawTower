@@ -239,6 +239,8 @@ mod tests {
             file_path: None,
             success: true,
             raw: String::new(),
+            actor: crate::auditd::Actor::Unknown,
+            ppid_exe: None,
         }
     }
 
@@ -250,6 +252,8 @@ mod tests {
             file_path: Some(path.to_string()),
             success: true,
             raw: String::new(),
+            actor: crate::auditd::Actor::Unknown,
+            ppid_exe: None,
         }
     }
 

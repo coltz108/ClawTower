@@ -7,6 +7,14 @@ use tokio::sync::mpsc;
 
 use crate::alerts::{Alert, Severity};
 
+/// Whether the event originated from the autonomous agent or a human operator
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Actor {
+    Agent,
+    Human,
+    Unknown,
+}
+
 /// Parsed representation of an audit event (may combine SYSCALL + EXECVE records)
 #[derive(Debug, Clone)]
 pub struct ParsedEvent {
@@ -22,6 +30,10 @@ pub struct ParsedEvent {
     pub success: bool,
     /// Raw message for fallback
     pub raw: String,
+    /// Attribution: agent (auid unset) vs human (auid set)
+    pub actor: Actor,
+    /// Parent process executable path (from /proc/<ppid>/exe)
+    pub ppid_exe: Option<String>,
 }
 
 /// Map aarch64 syscall numbers to names
@@ -147,6 +159,8 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
             file_path: None,
             success: true,
             raw: line.to_string(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
         });
     }
 
@@ -180,6 +194,20 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
             .or_else(|| extract_field(line, "exe"))
             .map(|s| decode_hex_arg(s));
 
+        // Attribution: auid=4294967295 (unset) means agent/service, otherwise human
+        let auid = extract_field(line, "auid").and_then(|s| s.parse::<u32>().ok());
+        let actor = match auid {
+            Some(4294967295) | None => Actor::Agent,
+            Some(_) => Actor::Human,
+        };
+
+        // Extract parent process exe for build-tool detection
+        let ppid = extract_field(line, "ppid").and_then(|s| s.parse::<u32>().ok());
+        let ppid_exe = ppid.and_then(|p| {
+            std::fs::read_link(format!("/proc/{}/exe", p)).ok()
+                .map(|path| path.to_string_lossy().to_string())
+        });
+
         return Some(ParsedEvent {
             syscall_name: name,
             command: None,
@@ -187,6 +215,8 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
             file_path,
             success,
             raw: line.to_string(),
+            actor,
+            ppid_exe,
         });
     }
 
@@ -203,6 +233,8 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
             file_path: None,
             success: false,
             raw: line.to_string(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
         });
     }
 
@@ -238,6 +270,11 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
 
 /// Convert a ParsedEvent into an Alert with readable message
 pub fn event_to_alert(event: &ParsedEvent) -> Alert {
+    let actor_tag = match event.actor {
+        Actor::Agent => "[AGENT] ",
+        Actor::Human => "[HUMAN] ",
+        Actor::Unknown => "",
+    };
     let (severity, msg) = if event.raw.contains("apparmor=\"DENIED\"") {
         let op = extract_field(&event.raw, "operation").unwrap_or("unknown");
         (Severity::Critical, format!("AppArmor denied: {}", op))
@@ -257,7 +294,7 @@ pub fn event_to_alert(event: &ParsedEvent) -> Alert {
         }
     };
 
-    Alert::new(severity, "auditd", &msg)
+    Alert::new(severity, "auditd", &format!("{}{}", actor_tag, msg))
 }
 
 /// Legacy parse function — now wraps parse_to_event + event_to_alert
@@ -529,6 +566,36 @@ mod tests {
         let event = parse_to_event(line, Some(&["1000".to_string()])).unwrap();
         let tamper = check_tamper_event(&event);
         assert!(tamper.is_none());
+    }
+
+    #[test]
+    fn test_extract_auid_agent() {
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=1000 auid=4294967295 exe="/usr/bin/curl""#;
+        let event = parse_to_event(line, Some(&["1000".to_string()])).unwrap();
+        assert_eq!(event.actor, Actor::Agent);
+    }
+
+    #[test]
+    fn test_extract_auid_human() {
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=1000 auid=1000 exe="/usr/bin/curl""#;
+        let event = parse_to_event(line, Some(&["1000".to_string()])).unwrap();
+        assert_eq!(event.actor, Actor::Human);
+    }
+
+    #[test]
+    fn test_agent_tag_in_alert() {
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=1000 auid=4294967295 exe="/usr/bin/curl""#;
+        let event = parse_to_event(line, Some(&["1000".to_string()])).unwrap();
+        let alert = event_to_alert(&event);
+        assert!(alert.message.starts_with("[AGENT] "));
+    }
+
+    #[test]
+    fn test_human_tag_in_alert() {
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=1000 auid=1000 exe="/usr/bin/curl""#;
+        let event = parse_to_event(line, Some(&["1000".to_string()])).unwrap();
+        let alert = event_to_alert(&event);
+        assert!(alert.message.starts_with("[HUMAN] "));
     }
 
     #[test]
