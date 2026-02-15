@@ -122,6 +122,9 @@ pub struct Sentinel {
 }
 
 impl Sentinel {
+    /// Create a new Sentinel, initializing shadow and quarantine directories.
+    ///
+    /// Shadow copies are created for any watched files that don't already have one.
     pub fn new(
         config: SentinelConfig,
         alert_tx: mpsc::Sender<Alert>,
@@ -149,6 +152,11 @@ impl Sentinel {
         Ok(Self { config, alert_tx, engine })
     }
 
+    /// Process a file change event for the given path.
+    ///
+    /// For protected files: quarantines the modified version and restores from shadow.
+    /// For watched files: updates the shadow copy and emits an Info alert.
+    /// If content scanning is enabled, runs SecureClaw patterns against the file.
     pub async fn handle_change(&self, path: &str) {
         let file_path = Path::new(path);
         if !file_path.exists() {
@@ -239,6 +247,9 @@ impl Sentinel {
         }
     }
 
+    /// Start the sentinel event loop, watching configured paths via inotify.
+    ///
+    /// Runs forever, debouncing filesystem events and dispatching to [`handle_change`](Self::handle_change).
     pub async fn run(self) -> Result<()> {
         use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 

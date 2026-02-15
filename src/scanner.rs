@@ -96,6 +96,7 @@ pub fn new_shared_scan_results() -> SharedScanResults {
     Arc::new(Mutex::new(Vec::new()))
 }
 
+/// Run a command with a timeout, killing it if it exceeds `timeout_secs`.
 fn run_cmd_timeout(cmd: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
     let mut child = Command::new(cmd)
         .args(args)
@@ -125,10 +126,12 @@ fn run_cmd_timeout(cmd: &str, args: &[&str], timeout_secs: u64) -> Result<String
 
 const DEFAULT_CMD_TIMEOUT: u64 = 30;
 
+/// Run a command with the default timeout (30s).
 fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
     run_cmd_timeout(cmd, args, DEFAULT_CMD_TIMEOUT)
 }
 
+/// Run a command, falling back to `sudo` if the initial invocation fails.
 fn run_cmd_with_sudo(cmd: &str, args: &[&str]) -> Result<String, String> {
     // Try without sudo first
     let output = Command::new(cmd)

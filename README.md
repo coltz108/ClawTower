@@ -212,47 +212,41 @@ clawsudo apt-get update
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      ClawAV Core                        │
-│                                                         │
-│  ┌──────────┐  ┌──────────┐  ┌────────────┐            │
-│  │  Auditd  │  │ Sentinel │  │  Journald  │  Sources   │
-│  │ Watcher  │  │ (inotify)│  │   Tailer   │            │
-│  └────┬─────┘  └────┬─────┘  └─────┬──────┘            │
-│       │              │              │                    │
-│       ▼              ▼              ▼                    │
-│  ┌──────────────────────────────────────────┐           │
-│  │          Alert Channel (mpsc)            │           │
-│  └──────────────────┬───────────────────────┘           │
-│                     │                                    │
-│       ┌─────────────┼─────────────┐                     │
-│       ▼             ▼             ▼                      │
-│  ┌─────────┐  ┌──────────┐  ┌──────────┐               │
-│  │Behavior │  │SecureClaw│  │  Policy  │  Analysis      │
-│  │Analyzer │  │ Engine   │  │ Engine   │                │
-│  └────┬────┘  └────┬─────┘  └────┬─────┘               │
-│       │             │             │                      │
-│       ▼             ▼             ▼                      │
-│  ┌──────────────────────────────────────────┐           │
-│  │           Alert Aggregator               │           │
-│  │     (dedup · rate-limit · suppress)      │           │
-│  └──────────────────┬───────────────────────┘           │
-│                     │                                    │
-│       ┌─────────────┼──────────────┐                    │
-│       ▼             ▼              ▼                     │
-│  ┌─────────┐  ┌──────────┐  ┌───────────┐              │
-│  │  Slack  │  │   TUI    │  │Audit Chain│  Outputs      │
-│  │Notifier │  │Dashboard │  │  (log)    │               │
-│  └─────────┘  └──────────┘  └───────────┘              │
-│                                                         │
-│  ┌─────────┐  ┌──────────┐  ┌───────────┐              │
-│  │  REST   │  │ Scanner  │  │  Admin    │  Services     │
-│  │  API    │  │  Loop    │  │  Socket   │               │
-│  └─────────┘  └──────────┘  └───────────┘              │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                        ClawAV Core                           │
+│                                                              │
+│  ┌───────────────────┐  ┌──────────┐  ┌──────────┐          │
+│  │  Auditd Watcher   │  │ Sentinel │  │ Journald │ Sources  │
+│  │ ┌───────────────┐ │  │ (inotify)│  │  Tailer  │          │
+│  │ │Behavior Engine│ │  └────┬─────┘  └────┬─────┘          │
+│  │ │SecureClaw     │ │       │              │                │
+│  │ │Policy Engine  │ │  ┌────┴────┐   ┌────┴────┐           │
+│  │ └───────────────┘ │  │ Scanner │   │Firewall │           │
+│  └────────┬──────────┘  │  Loop   │   │ Monitor │           │
+│           │             └────┬────┘   └────┬────┘           │
+│           ▼                  ▼              ▼                │
+│  ┌──────────────────────────────────────────────────┐       │
+│  │            raw_tx Channel (mpsc, cap=1000)       │       │
+│  └──────────────────────┬───────────────────────────┘       │
+│                         ▼                                    │
+│  ┌──────────────────────────────────────────────────┐       │
+│  │             Alert Aggregator                      │       │
+│  │       (fuzzy dedup · rate-limit · suppress)       │       │
+│  └──────┬────────────┬────────────┬─────────────────┘       │
+│         ▼            ▼            ▼                          │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐                  │
+│  │  Slack   │  │   TUI    │  │Audit Chain│  Outputs          │
+│  │ Notifier │  │Dashboard │  │  (log)    │                  │
+│  └──────────┘  └──────────┘  └───────────┘                  │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐                  │
+│  │  REST    │  │  Proxy   │  │  Admin    │  Services         │
+│  │  API     │  │  (DLP)   │  │  Socket   │                  │
+│  └──────────┘  └──────────┘  └───────────┘                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**Data flow:** Sources generate raw events → alert channel fans out to analyzers → aggregator deduplicates and rate-limits → outputs deliver to Slack, TUI, and the hash-chained audit log. The scanner loop runs periodic system checks on a separate timer. The admin socket accepts authenticated commands via Unix domain socket.
+**Data flow:** The auditd watcher parses syscall events and runs them through behavior analysis, SecureClaw pattern matching, and policy evaluation *before* producing alerts. Other sources (sentinel, journald, scanner, firewall) produce alerts directly. All alerts flow through the `raw_tx` channel to the aggregator, which deduplicates and rate-limits before fanning out to Slack, TUI, REST API, and the hash-chained audit log. The admin socket accepts authenticated commands via Unix domain socket.
 
 ## Contributing
 
@@ -275,18 +269,41 @@ Add entries to `sentinel.watch_paths` in config, or extend `PROTECTED_FILES`/`WA
 
 ### Adding Pattern Databases
 
-SecureClaw patterns are loaded from YAML files in the vendor directory. Each file contains regex patterns with name, category, and severity fields. Drop new `.yaml` files into the vendor directory.
+SecureClaw patterns are loaded from JSON files in the vendor directory (`vendor/secureclaw/`). Four databases are supported:
+- `injection-patterns.json` — prompt injection patterns by category
+- `dangerous-commands.json` — dangerous command patterns with severity and action
+- `privacy-rules.json` — PII/credential regex rules
+- `supply-chain-ioc.json` — suspicious skill patterns and C2 indicators
+
+Each file contains regex patterns compiled at startup. Drop updated `.json` files into the vendor directory.
 
 ### Adding Policy Rules
 
-Policy rules for `clawsudo` are YAML files in the `policies/` directory:
+Policy rules are YAML files in the `policies/` directory. Detection rules use `action`:
 
 ```yaml
-- name: block-curl-to-external
-  match:
-    command: ["curl"]
-    exclude_args: ["localhost", "127.0.0.1"]
-  enforcement: deny
+rules:
+  - name: block-curl-to-external
+    description: "Block curl to unknown hosts"
+    match:
+      command: ["curl", "wget"]
+      exclude_args: ["api.anthropic.com", "github.com"]
+    action: critical
+```
+
+Enforcement rules for `clawsudo` use `enforcement`:
+
+```yaml
+rules:
+  - name: allow-apt
+    match:
+      command: ["apt", "apt-get"]
+    enforcement: allow
+
+  - name: deny-sudo-shell
+    match:
+      command: ["bash", "sh", "zsh"]
+    enforcement: deny
 ```
 
 ## License

@@ -20,6 +20,10 @@ use std::time::Duration;
 const GITHUB_REPO: &str = "coltz108/ClawAV";
 const RELEASE_PUBLIC_KEY: &[u8; 32] = include_bytes!("release-key.pub");
 
+/// Verify an Ed25519 signature over the SHA-256 digest of a binary.
+///
+/// The embedded public key (`release-key.pub`) is compiled into the binary at build time.
+/// Returns an error if the signature length is wrong, the key is invalid, or verification fails.
 fn verify_release_signature(binary_data: &[u8], sig_bytes: &[u8]) -> Result<()> {
     if sig_bytes.len() != 64 {
         bail!("Invalid signature length: {} (expected 64)", sig_bytes.len());
@@ -36,6 +40,7 @@ fn verify_release_signature(binary_data: &[u8], sig_bytes: &[u8]) -> Result<()> 
     eprintln!("✅ Ed25519 signature verified");
     Ok(())
 }
+/// Path to the stored admin key hash (Argon2), used for custom binary installs.
 const ADMIN_KEY_HASH_PATH: &str = "/etc/clawav/admin.key.hash";
 
 /// Detect the correct release asset name for this platform
@@ -205,7 +210,9 @@ fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Notify Slack about the upgrade (best-effort, reads config)
+/// Notify Slack about a completed upgrade (best-effort, reads config from disk).
+///
+/// Silently fails if Slack is not configured or the webhook request errors.
 fn notify_slack(from_version: &str, to_version: &str) {
     let config_path = PathBuf::from("/etc/clawav/config.toml");
     let config = match crate::config::Config::load(&config_path) {
@@ -232,6 +239,7 @@ fn notify_slack(from_version: &str, to_version: &str) {
         .send();
 }
 
+/// Read the system hostname from `/etc/hostname`, falling back to "unknown".
 fn hostname() -> String {
     fs::read_to_string("/etc/hostname")
         .unwrap_or_else(|_| "unknown".into())
