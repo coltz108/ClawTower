@@ -93,6 +93,26 @@ curl http://localhost:18791/api/security
 }
 ```
 
+### `GET /api/health`
+
+Health check with last alert age and version info.
+
+```bash
+curl http://localhost:18791/api/health
+```
+
+```json
+{
+  "healthy": true,
+  "uptime_seconds": 3600,
+  "version": "0.1.9",
+  "last_alert_age_seconds": 45
+}
+```
+
+- `version` is the Cargo package version (`CARGO_PKG_VERSION`)
+- `last_alert_age_seconds` is `null` if no alerts have been received
+
 ### Any other path
 
 Returns 404:

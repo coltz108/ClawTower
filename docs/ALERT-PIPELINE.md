@@ -228,7 +228,7 @@ Every component below receives a `raw_tx: mpsc::Sender<Alert>` clone and sends a
 
 ### update (`src/update.rs`)
 
-- **Source tag**: `"update"`
+- **Source tag**: `"auto-update"`
 - Auto-updater that checks for new GitHub releases on a configurable interval
 - Sends alerts when updates are available or applied
 - Config: `[auto_update]` section — `enabled`, `interval`

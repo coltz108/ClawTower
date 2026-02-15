@@ -590,10 +590,95 @@ sudo scripts/setup-iptables.sh
 | `configure.sh` | Interactive config wizard |
 | `uninstall.sh` | Reverse hardening + remove (requires admin key) |
 | `setup-auditd.sh` | Install auditd rules for ClawAV monitoring |
+| `setup-audit-rules.sh` | Configure specific audit rules (syscall watches, tamper keys) |
 | `setup-iptables.sh` | Configure iptables logging |
 | `setup-apparmor.sh` | Load AppArmor profiles |
+| `setup-falco.sh` | Install and configure Falco eBPF monitoring |
+| `setup-samhain.sh` | Install and configure Samhain file integrity monitoring |
+| `setup-slack.sh` | Configure Slack webhook integration |
+| `setup-sudoers-deny.sh` | Install sudoers deny rules preventing agent from stopping ClawAV |
+| `build-preload.sh` | Compile `libclawguard.so` LD_PRELOAD guard library |
+| `enable-preload.sh` | Install and activate the LD_PRELOAD guard |
 | `sync-secureclaw.sh` | Update SecureClaw pattern databases |
 | `oneshot-install.sh` | Single-command install from GitHub |
+
+---
+
+## Additional Public API Details
+
+The following public items are used internally and may be relevant when extending ClawAV:
+
+### `api.rs`
+- **`AlertRingBuffer`** — Fixed-capacity ring buffer for the HTTP API alert store
+- **`SharedAlertStore`** — Type alias: `Arc<Mutex<AlertRingBuffer>>`
+- **`new_shared_store(max)`** — Constructor for `SharedAlertStore`
+
+### `scanner.rs`
+- **`SharedScanResults`** — Type alias: `Arc<Mutex<Vec<ScanResult>>>`
+- **`new_shared_scan_results()`** — Constructor for `SharedScanResults`
+- **`SecurityScanner`** — Unit struct with `run_all_scans()` static method
+- **`parse_ufw_status(output)`** — Parses `ufw status` output into a `ScanResult`
+- **`parse_auditctl_status(output)`** — Parses `auditctl -s` output into a `ScanResult`
+- **`parse_disk_usage(output)`** — Parses `df -h /` output into a `ScanResult`
+- **`check_lsattr_immutable(output)`** — Returns `true` if lsattr output shows immutable flag
+
+### `auditd.rs`
+- **`extract_field(line, field)`** — Extracts a named field value from an audit log line
+- **`parse_to_event(line, watched_users)`** — Parses raw audit line into `ParsedEvent`
+- **`check_tamper_event(event)`** — Checks if a `ParsedEvent` is a ClawAV tamper attempt
+- **`event_to_alert(event)`** — Converts a `ParsedEvent` to an `Alert`
+- **`parse_audit_line(line, watched_users)`** — Full pipeline: parse + behavior/policy checks → `Alert`
+
+### `behavior.rs`
+- **`BehaviorCategory`** — Enum: `DataExfiltration`, `PrivilegeEscalation`, `SecurityTamper`, `Reconnaissance`, `SideChannel`
+- **`classify_behavior(event)`** — Takes a `ParsedEvent`, returns `Option<(BehaviorCategory, Severity)>`
+
+### `cognitive.rs`
+- **`CognitiveAlert`** — Struct: `path`, `kind`, `message`, `diff`
+- **`CognitiveAlertKind`** — Enum: `Modified`, `Deleted`, `NewUnexpected`, `ContentThreat`, `BaselineMissing`
+- **`scan_cognitive_integrity(workspace_dir, baseline_path, secureclaw)`** — Runs cognitive checks, returns `Vec<ScanResult>`
+
+### `sentinel.rs`
+- **`shadow_path_for(shadow_dir, file_path)`** — Computes shadow copy path from a watched file path
+- **`quarantine_path_for(quarantine_dir, file_path)`** — Computes quarantine path with timestamp prefix
+- **`generate_unified_diff(old, new, filename)`** — Produces unified diff string between two text contents
+- **`is_log_rotation(file_path)`** — Returns `true` if the file path looks like a log rotation artifact
+
+### `secureclaw.rs`
+- **`CompiledPattern`** — Compiled regex with name and category metadata
+- **`PatternMatch`** — Result of a pattern match: `pattern_name`, `category`, `matched_text`, `severity`, `action`
+
+### `proxy.rs`
+- **`DlpResult`** — Enum: `Clean`, `Blocked(String)`, `Redacted(String)` — result of DLP scanning
+
+### `update.rs`
+- **`run_update(args)`** — Entry point for the `clawav update` CLI subcommand
+- **`is_newer_version(current, remote)`** — Semver comparison, returns `true` if remote is newer
+
+### `audit_chain.rs`
+- **`run_verify_audit(path)`** — CLI entry point for `clawav verify-audit [path]`
+
+### `tui.rs`
+- **`TuiEvent`** — Enum: `Key(KeyEvent)`, `Tick`, `Alert(Alert)`, `ScanResults(Vec<ScanResult>)`
+- **`ConfigField`** — Struct for TUI config editor: field name, value, section, field type
+- **`ConfigFocus`** — Enum: `Sections`, `Fields` — which pane has focus in config editor
+- **`FieldType`** — Enum: `Text`, `Bool`, `Number`, `Select(Vec<String>)` — config field input type
+- **`SudoPopup`** — Struct for the sudo password modal in TUI
+- **`SudoStatus`** — Enum: `Idle`, `Waiting`, `Success`, `Failed(String)`
+
+### `config.rs` (Sub-structs)
+All config section structs are public and `Deserialize + Serialize + Default`:
+`GeneralConfig`, `SlackConfig`, `AuditdConfig`, `NetworkConfig`, `FalcoConfig`, `SamhainConfig`, `SshConfig`, `ApiConfig`, `ScansConfig`, `ProxyConfig`, `KeyMapping`, `DlpConfig`, `DlpPattern`, `PolicyConfig`, `NetPolicyConfig`, `SentinelConfig`, `WatchPathConfig`, `WatchPolicy`, `AutoUpdateConfig`
+
+- **`WatchPolicy`** — Enum: `Protected`, `Watched` — sentinel file policy
+- **`default_allowlisted_cidrs()`** — Returns default LAN CIDR list for network config
+- **`default_allowlisted_ports()`** — Returns default safe port list (`[443, 53, 123, 5353]`)
+
+### `logtamper.rs`
+- **`scan_audit_log_health(log_path)`** — Checks audit log for truncation, inode changes, permission issues → `ScanResult`
+
+### `journald.rs`
+- **`journald_available()`** — Returns `true` if `journalctl` is available on the system
 
 ---
 

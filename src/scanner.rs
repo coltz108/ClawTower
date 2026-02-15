@@ -62,6 +62,7 @@ pub struct ScanResult {
 }
 
 impl ScanResult {
+    /// Create a new scan result with the given category, status, and details.
     pub fn new(category: &str, status: ScanStatus, details: &str) -> Self {
         Self {
             category: category.to_string(),
@@ -71,6 +72,8 @@ impl ScanResult {
         }
     }
 
+    /// Convert to an [`Alert`] if non-passing (Warn → Warning, Fail → Critical).
+    /// Returns `None` for passing results.
     pub fn to_alert(&self) -> Option<Alert> {
         match self.status {
             ScanStatus::Pass => None,

@@ -49,7 +49,7 @@ Periodic scans covering firewall status (UFW), auditd configuration, SSH hardeni
 Every alert is appended to a sequential, SHA-256 hash-chained log. Each entry includes the hash of the previous entry, making retroactive tampering detectable. Chain integrity is verifiable at any time.
 
 ### 🖥️ Terminal UI
-Full-featured Ratatui dashboard with tabbed views: live alert feed, scanner results, configuration editor, and audit chain viewer. Navigate with keyboard shortcuts; edit config in-place.
+Full-featured Ratatui dashboard with six tabbed views: Alerts (live feed), Network, Falco, FIM (Samhain), System status, and interactive Config editor. Navigate with keyboard shortcuts; edit config in-place.
 
 ### 🔔 Slack Alerts
 Real-time notifications to Slack via webhook with severity filtering, failover to a backup webhook, and periodic health heartbeats. Configurable minimum alert level for Slack delivery.
@@ -108,9 +108,41 @@ sudo mkdir -p /etc/clawav
 sudo cp config.toml /etc/clawav/config.toml
 sudo nano /etc/clawav/config.toml
 
-# Generate admin key (required for updates and admin commands)
-clawav admin keygen
+# Admin key is auto-generated on first run — check journalctl output to capture it
+# It is displayed once and stored only as an Argon2 hash
+
+# Set up monitoring integrations (all optional)
+sudo scripts/setup-auditd.sh        # Auditd rules for syscall monitoring
+sudo scripts/setup-iptables.sh      # Iptables logging for network alerts
+sudo scripts/setup-apparmor.sh      # AppArmor confinement profiles
+sudo scripts/setup-sudoers-deny.sh  # Block agent from stopping ClawAV via sudo
+sudo scripts/setup-slack.sh         # Configure Slack webhook
+sudo scripts/setup-falco.sh         # Falco eBPF monitoring (optional)
+sudo scripts/setup-samhain.sh       # Samhain file integrity (optional)
+sudo scripts/build-preload.sh       # Build LD_PRELOAD guard library
+sudo scripts/enable-preload.sh      # Activate LD_PRELOAD guard
 ```
+
+### Available Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/setup.sh` | Full installation (binary, dirs, systemd service) |
+| `scripts/install.sh` | Apply tamper-proof hardening (chattr +i, sudoers deny) |
+| `scripts/configure.sh` | Interactive config wizard |
+| `scripts/uninstall.sh` | Reverse hardening + remove (requires admin key) |
+| `scripts/setup-auditd.sh` | Install auditd rules |
+| `scripts/setup-audit-rules.sh` | Configure specific audit watch rules |
+| `scripts/setup-iptables.sh` | Configure iptables logging |
+| `scripts/setup-apparmor.sh` | Load AppArmor profiles |
+| `scripts/setup-falco.sh` | Install/configure Falco |
+| `scripts/setup-samhain.sh` | Install/configure Samhain |
+| `scripts/setup-slack.sh` | Configure Slack webhooks |
+| `scripts/setup-sudoers-deny.sh` | Sudoers deny rules for agent |
+| `scripts/build-preload.sh` | Compile libclawguard.so |
+| `scripts/enable-preload.sh` | Activate LD_PRELOAD guard |
+| `scripts/sync-secureclaw.sh` | Update SecureClaw pattern databases |
+| `scripts/oneshot-install.sh` | Single-command install from GitHub |
 
 ## Configuration
 
@@ -120,7 +152,7 @@ ClawAV uses a TOML config file (default: `/etc/clawav/config.toml`). Key section
 [general]
 watched_users = ["openclaw"]    # Users to monitor (empty = all)
 min_alert_level = "info"        # info | warning | critical
-log_file = "/var/log/clawav/audit.jsonl"
+log_file = "/var/log/clawav/clawav.log"
 
 [slack]
 webhook_url = "https://hooks.slack.com/services/..."
@@ -194,7 +226,7 @@ enabled = true                  # Monitor SSH login events via journald
 clawav
 
 # Run headless (servers, background monitoring)
-clawav --headless
+clawav run --headless
 
 # Self-update to latest release
 clawav update
@@ -202,8 +234,8 @@ clawav update
 # Check for updates without installing
 clawav update --check
 
-# Generate admin API key
-clawav admin keygen
+# Admin key is auto-generated on first run and printed once — save it!
+# It is stored only as an Argon2 hash at /etc/clawav/admin.key.hash
 
 # Use clawsudo instead of sudo for AI agents
 clawsudo apt-get update
