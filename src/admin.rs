@@ -157,6 +157,11 @@ pub fn init_admin_key(hash_path: &Path) -> Result<()> {
     std::fs::write(hash_path, &hash)
         .with_context(|| format!("Failed to write key hash to {}", hash_path.display()))?;
 
+    // Make the hash file immutable to prevent tampering
+    let _ = std::process::Command::new("chattr")
+        .args(["+i", &hash_path.to_string_lossy()])
+        .status();
+
     eprintln!();
     eprintln!("╔══════════════════════════════════════════════════════════════╗");
     eprintln!("║  ADMIN KEY GENERATED — SAVE THIS NOW, IT WILL NOT BE       ║");

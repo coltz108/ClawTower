@@ -653,8 +653,9 @@ async fn async_main() -> Result<()> {
     if config.auto_update.enabled {
         let update_tx = raw_tx.clone();
         let update_interval = config.auto_update.interval;
+        let update_mode = config.auto_update.mode.clone();
         tokio::spawn(async move {
-            crate::update::run_auto_updater(update_tx, update_interval).await;
+            crate::update::run_auto_updater(update_tx, update_interval, update_mode).await;
         });
     }
 

@@ -428,12 +428,15 @@ pub fn is_newer_version(current: &str, remote: &str) -> bool {
 /// Runs forever, sleeping for `interval_secs` between checks. On finding a newer
 /// release with a valid checksum (and optional Ed25519 signature), downloads and
 /// replaces the binary, notifies Slack, and restarts the systemd service.
-pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64) {
+pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64, mode: String) {
+    let mut last_notified_version = String::new();
     loop {
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;
 
         let tx = alert_tx.clone();
-        let result: Result<()> = async {
+        let mode = mode.clone();
+        let last_notified = last_notified_version.clone();
+        let result: Result<Option<String>> = async {
             // fetch_release uses reqwest::blocking, so wrap in spawn_blocking
             let (tag, download_url, sha256_url, sig_url) =
                 tokio::task::spawn_blocking(|| fetch_release(None))
@@ -444,7 +447,18 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64)
             let remote_version = tag.strip_prefix('v').unwrap_or(&tag);
 
             if !is_newer_version(current_version, remote_version) {
-                return Ok(());
+                return Ok(None);
+            }
+
+            // Notify mode: alert once per version, don't install
+            if mode == "notify" {
+                if last_notified != tag {
+                    let _ = tx.send(Alert::new(
+                        Severity::Info, "auto-update",
+                        &format!("🆕 ClawAV {} available (current: v{}). Run `clawav update` to install.", tag, current_version),
+                    )).await;
+                }
+                return Ok(Some(tag));
             }
 
             let _ = tx.send(Alert::new(
@@ -485,6 +499,7 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64)
             let _ = run_cmd("chattr", &["-i", &binary_path.to_string_lossy()]);
             fs::rename(&tmp_path, &binary_path)?;
             let _ = run_cmd("chattr", &["+i", &binary_path.to_string_lossy()]);
+            let _ = run_cmd("chattr", &["+i", "/etc/clawav/admin.key.hash"]);
 
             let _ = tx.send(Alert::new(
                 Severity::Info, "auto-update",
@@ -501,14 +516,20 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64)
             // Restart service
             let _ = run_cmd("systemctl", &["restart", "clawav"]);
 
-            Ok(())
+            Ok(None)
         }.await;
 
-        if let Err(e) = result {
-            let _ = alert_tx.send(Alert::new(
-                Severity::Warning, "auto-update",
-                &format!("Auto-update check failed: {}", e),
-            )).await;
+        match result {
+            Ok(Some(notified_tag)) => {
+                last_notified_version = notified_tag;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = alert_tx.send(Alert::new(
+                    Severity::Warning, "auto-update",
+                    &format!("Auto-update check failed: {}", e),
+                )).await;
+            }
         }
     }
 }

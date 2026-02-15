@@ -53,15 +53,19 @@ pub struct AutoUpdateConfig {
     pub enabled: bool,
     #[serde(default = "default_auto_update_interval")]
     pub interval: u64,
+    #[serde(default = "default_auto_update_mode")]
+    pub mode: String,
 }
 
 fn default_auto_update_interval() -> u64 { 300 }
+fn default_auto_update_mode() -> String { "auto".to_string() }
 
 impl Default for AutoUpdateConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             interval: 300,
+            mode: "auto".to_string(),
         }
     }
 }
