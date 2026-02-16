@@ -190,6 +190,37 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
         });
     }
 
+    // PROCTITLE records contain the full command line in hex, including env
+    // var prefixes like LD_PRELOAD= that don't appear in EXECVE records.
+    if line.contains("type=PROCTITLE") {
+        if let Some(hex_start) = line.find("proctitle=") {
+            let hex = &line[hex_start + 10..];
+            // Decode hex to bytes, replace NUL with space
+            if let Ok(bytes) = (0..hex.len())
+                .step_by(2)
+                .take_while(|&i| i + 2 <= hex.len())
+                .map(|i| u8::from_str_radix(&hex[i..i+2], 16))
+                .collect::<Result<Vec<u8>, _>>()
+            {
+                let decoded = String::from_utf8_lossy(&bytes).replace('\0', " ");
+                if decoded.contains("LD_PRELOAD=") {
+                    let cmd = decoded.trim().to_string();
+                    return Some(ParsedEvent {
+                        syscall_name: "execve".to_string(),
+                        command: Some(cmd.clone()),
+                        args: cmd.split_whitespace().map(|s| s.to_string()).collect(),
+                        file_path: None,
+                        success: true,
+                        raw: format!("{} LD_PRELOAD={}", line, decoded),
+                        actor: Actor::Unknown,
+                        ppid_exe: None,
+                    });
+                }
+            }
+        }
+        return None;
+    }
+
     // Always allow tamper-detection events through regardless of user filter
     let is_tamper = line.contains("key=\"clawav-tamper\"")
         || line.contains("key=clawav-tamper")
@@ -627,5 +658,26 @@ mod tests {
     #[test]
     fn test_syscall_241_is_perf_event_open() {
         assert_eq!(syscall_name_aarch64(241), "perf_event_open");
+    }
+
+    #[test]
+    fn test_proctitle_ld_preload_detected() {
+        // "bash -c LD_PRELOAD=/tmp/evil.so ls" in hex with NUL separators
+        let hex = "2F62696E2F62617368002D63004C445F5052454C4F41443D2F746D702F6576696C2E736F206C73";
+        let line = format!("type=PROCTITLE msg=audit(1234567890.123:456): proctitle={}", hex);
+        let event = parse_to_event(&line, None);
+        assert!(event.is_some(), "PROCTITLE with LD_PRELOAD should produce an event");
+        let e = event.unwrap();
+        assert!(e.raw.contains("LD_PRELOAD="), "raw should contain LD_PRELOAD");
+        assert!(e.command.unwrap().contains("LD_PRELOAD="));
+    }
+
+    #[test]
+    fn test_proctitle_without_ld_preload_ignored() {
+        // "ls /dev/null" in hex
+        let hex = "6C73002F6465762F6E756C6C";
+        let line = format!("type=PROCTITLE msg=audit(1234567890.123:456): proctitle={}", hex);
+        let event = parse_to_event(&line, None);
+        assert!(event.is_none(), "PROCTITLE without LD_PRELOAD should be ignored");
     }
 }

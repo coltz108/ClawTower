@@ -269,13 +269,25 @@ impl Sentinel {
                 &msg,
             )).await;
         } else {
-            // Watched policy or unknown — update shadow, info alert
+            // Watched policy or unknown — update shadow
             let _ = std::fs::write(&shadow, &current);
-            let _ = self.alert_tx.send(Alert::new(
-                Severity::Info,
-                "sentinel",
-                &format!("File changed: {}", path),
-            )).await;
+
+            // Cognitive file detection: .md and .txt files can carry prompt
+            // injections, so elevate severity and include the diff.
+            let is_cognitive = path.ends_with(".md") || path.ends_with(".txt");
+            if is_cognitive {
+                let _ = self.alert_tx.send(Alert::new(
+                    Severity::Warning,
+                    "sentinel",
+                    &format!("Cognitive file modified: {} — diff:\n{}", path, diff),
+                )).await;
+            } else {
+                let _ = self.alert_tx.send(Alert::new(
+                    Severity::Info,
+                    "sentinel",
+                    &format!("File changed: {}", path),
+                )).await;
+            }
         }
     }
 
@@ -510,9 +522,10 @@ mod tests {
         let shadow_content = std::fs::read_to_string(&shadow).unwrap();
         assert_eq!(shadow_content, new_content);
 
-        // Alert should be Info
+        // Alert should be Warning (cognitive file: .md)
         let alert = rx.try_recv().unwrap();
-        assert_eq!(alert.severity, Severity::Info);
+        assert_eq!(alert.severity, Severity::Warning);
+        assert!(alert.message.contains("Cognitive file modified"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
