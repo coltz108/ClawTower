@@ -17,10 +17,11 @@ ClawAV installed the following components:
 | Admin key hash | `/etc/clawav/admin.key.hash` | Immutable admin authentication |
 | Quarantine | `/etc/clawav/quarantine/` | Files flagged by sentinel |
 | SecureClaw vendor | `/etc/clawav/secureclaw/` | Third-party security rules |
+| Config overrides | `/etc/clawav/config.d/` | Your customizations (never touched by updates) |
 | Logs | `/var/log/clawav/watchdog.log` | Primary log file |
 | systemd service | `clawav.service` | Keeps the watchdog running |
 
-**Immutable files** (set with `chattr +i`): The admin key hash and critical config files are made immutable to prevent tampering — even by root. This is intentional.
+**Immutable files** (set with `chattr +i`): The binary, service file, and admin key hash are made immutable to prevent tampering. Config files are **not** immutable — customize via `/etc/clawav/config.d/` override files (see [CONFIGURATION.md](CONFIGURATION.md)).
 
 **Log sources ClawAV monitors:**
 - `/var/log/audit/audit.log` — auditd syscall events

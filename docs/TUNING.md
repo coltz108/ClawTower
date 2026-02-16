@@ -1,5 +1,9 @@
 # ClawAV Tuning Guide
 
+> **Tip:** Use `/etc/clawav/config.d/` for all customizations instead of editing
+> `config.toml` directly. Your overrides survive updates automatically.
+> See [CONFIGURATION.md](CONFIGURATION.md) for details.
+
 Based on the [Noise Analysis](NOISE-ANALYSIS.md) of 18.2 hours of production logs (16,534 total alerts).
 
 ---

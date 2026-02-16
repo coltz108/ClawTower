@@ -1,5 +1,87 @@
 # ClawAV Configuration Reference
 
+## Config Layering
+
+ClawAV uses a layered configuration system. Upstream defaults ship in base files;
+your customizations live in separate override files that are never touched by updates.
+
+### File Layout
+
+| File | Owner | Purpose |
+|------|-------|---------|
+| `/etc/clawav/config.toml` | Upstream | Base config — replaced on updates |
+| `/etc/clawav/config.d/*.toml` | You | Your overrides — never touched by updates |
+| `/etc/clawav/policies/default.yaml` | Upstream | Base detection rules |
+| `/etc/clawav/policies/*.yaml` | You | Your custom/override rules |
+
+### Config Overrides (config.d/)
+
+Create `.toml` files in `/etc/clawav/config.d/`. They're loaded alphabetically
+after `config.toml` and merged:
+
+- **Scalars** — your value replaces the default
+- **Lists** — use `_add` to append, `_remove` to remove, or set the field directly to replace
+
+#### Examples
+
+Disable Falco and add a host to the network allowlist:
+
+```toml
+# /etc/clawav/config.d/my-overrides.toml
+[falco]
+enabled = false
+
+[netpolicy]
+allowed_hosts_add = ["myapi.example.com"]
+```
+
+Remove a default allowlisted CIDR:
+
+```toml
+# /etc/clawav/config.d/strict-network.toml
+[network]
+allowlisted_cidrs_remove = ["169.254.0.0/16"]
+```
+
+#### Naming Convention
+
+Prefix with numbers to control load order: `00-first.toml`, `50-middle.toml`, `99-last.toml`.
+
+### Policy Overrides
+
+Create `.yaml` files in `/etc/clawav/policies/`. Rules are merged by `name`:
+
+- Same name as a default rule → **your version replaces it entirely**
+- New name → added to the rule set
+- `enabled: false` → disables a rule
+
+```yaml
+# /etc/clawav/policies/custom.yaml
+rules:
+  # Override the exfil rule
+  - name: "block-data-exfiltration"
+    description: "Customized exfil detection"
+    match:
+      command: ["curl", "wget"]
+      exclude_args:
+        - "mycompany-api.com"
+    action: critical
+
+  # Disable a noisy rule
+  - name: "detect-scheduled-tasks"
+    enabled: false
+```
+
+> **Note:** When you override a rule by name, you own that rule. Future upstream
+> improvements to that rule won't auto-merge — this is by design.
+
+### Updates
+
+When ClawAV updates, `config.toml` and `default.yaml` are replaced with new versions.
+Your files in `config.d/` and custom policy YAMLs are untouched. You don't need to do anything.
+
+---
+
 ClawAV uses a **TOML** configuration file, typically located at `/etc/clawav/config.toml`.
 
 > ⚠️ **TOML only.** Despite the `config.example.yaml` file in the repo root, ClawAV's config parser only reads TOML format. The YAML file is a legacy reference and should not be used directly.

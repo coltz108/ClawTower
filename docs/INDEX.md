@@ -8,7 +8,7 @@ Quick map to every doc in this project. Start with what you need.
 |----------|-------------|
 | [README](../README.md) | Project overview, features, quick start, config basics |
 | [INSTALL.md](INSTALL.md) | Full installation walkthrough, hardening steps, systemd setup, uninstall |
-| [CONFIGURATION.md](CONFIGURATION.md) | Every config field — types, defaults, TOML examples |
+| [CONFIGURATION.md](CONFIGURATION.md) | Config layering, overrides, policy customization, field reference |
 
 ## Architecture & Internals
 
