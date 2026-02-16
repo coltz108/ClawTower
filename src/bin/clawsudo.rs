@@ -229,6 +229,14 @@ const GTFOBINS_PATTERNS: &[&str] = &[
     " /usr/local/bin/clawav", " /etc/clawav/",
     // systemd-run
     "systemd-run",
+    // find -exec (arbitrary command execution)
+    "-exec", "-execdir", "-ok", "-okdir",
+    // apt/apt-get hooks (arbitrary code via -o)
+    "APT::Update::Pre-Invoke", "APT::Update::Post-Invoke",
+    "Dpkg::Pre-Invoke", "Dpkg::Post-Invoke",
+    "APT::Install::Pre-Invoke", "APT::Install::Post-Invoke",
+    // apt-get -o direct hook injection
+    "-o APT::", "-o Dpkg::", "-oAPT::", "-oDpkg::",
     // Generic shell metacharacters in args
     ";", "$(", "`",
     // Pipe to shell
@@ -695,5 +703,47 @@ mod tests {
         let args: Vec<String> = vec!["systemctl".into(), "restart".into(), "clawav".into()];
         let full = "systemctl restart clawav";
         assert!(check_gtfobins("systemctl", &args, full).is_none());
+    }
+
+    #[test]
+    fn test_gtfobins_find_exec_denied() {
+        let args: Vec<String> = vec!["find".into(), "/".into(), "-exec".into(), "id".into(), ";".into()];
+        let full = "find / -exec id ;";
+        assert!(check_gtfobins("find", &args, full).is_some(), "find -exec should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_find_execdir_denied() {
+        let args: Vec<String> = vec!["find".into(), "/tmp".into(), "-execdir".into(), "sh".into(), "-c".into(), "id".into(), ";".into()];
+        let full = "find /tmp -execdir sh -c id ;";
+        assert!(check_gtfobins("find", &args, full).is_some(), "find -execdir should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_find_name_allowed() {
+        let args: Vec<String> = vec!["find".into(), "/tmp".into(), "-name".into(), "*.log".into()];
+        let full = "find /tmp -name *.log";
+        assert!(check_gtfobins("find", &args, full).is_none(), "find -name should be allowed");
+    }
+
+    #[test]
+    fn test_gtfobins_apt_get_hook_denied() {
+        let args: Vec<String> = vec!["apt-get".into(), "update".into(), "-o".into(), "APT::Update::Pre-Invoke::=id".into()];
+        let full = "apt-get update -o APT::Update::Pre-Invoke::=id";
+        assert!(check_gtfobins("apt-get", &args, full).is_some(), "apt-get -o hook should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_apt_get_install_allowed() {
+        let args: Vec<String> = vec!["apt-get".into(), "install".into(), "vim".into()];
+        let full = "apt-get install vim";
+        assert!(check_gtfobins("apt-get", &args, full).is_none(), "apt-get install should be allowed");
+    }
+
+    #[test]
+    fn test_gtfobins_dpkg_hook_denied() {
+        let args: Vec<String> = vec!["apt-get".into(), "install".into(), "-o".into(), "Dpkg::Pre-Invoke::=sh".into()];
+        let full = "apt-get install -o Dpkg::Pre-Invoke::=sh";
+        assert!(check_gtfobins("apt-get", &args, full).is_some(), "Dpkg hook should be denied");
     }
 }
