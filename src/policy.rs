@@ -563,4 +563,46 @@ rules:
         let event_whoami = make_exec_event(&["whoami"]);
         assert!(engine.evaluate(&event_whoami).is_none(), "Recon should be disabled");
     }
+
+    #[test]
+    fn test_grep_clawav_config_does_not_trigger_deny_write() {
+        // Regression: deny-clawav-config-write must only fire on write-like commands
+        // (sed -i, tee, vim, etc.), NOT on reads like grep/cat.
+        let yaml = r#"
+rules:
+  - name: "deny-clawav-config-write"
+    description: "Detect writes to ClawAV config files"
+    match:
+      command_contains:
+        - "sed -i /etc/clawav/"
+        - "tee /etc/clawav/"
+        - "vim /etc/clawav/"
+        - "nano /etc/clawav/"
+        - "vi /etc/clawav/"
+        - "chattr -i /etc/clawav/"
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+
+        // grep should NOT trigger
+        let grep_event = make_exec_event(&["grep", "pattern", "/etc/clawav/config.toml"]);
+        assert!(
+            engine.evaluate(&grep_event).is_none(),
+            "grep /etc/clawav/config.toml must not trigger deny-clawav-config-write"
+        );
+
+        // cat should NOT trigger
+        let cat_event = make_exec_event(&["cat", "/etc/clawav/config.toml"]);
+        assert!(
+            engine.evaluate(&cat_event).is_none(),
+            "cat /etc/clawav/config.toml must not trigger deny-clawav-config-write"
+        );
+
+        // sed -i SHOULD trigger
+        let sed_event = make_exec_event(&["sed", "-i", "/etc/clawav/config.toml"]);
+        assert!(
+            engine.evaluate(&sed_event).is_some(),
+            "sed -i /etc/clawav/ should trigger deny-clawav-config-write"
+        );
+    }
 }
