@@ -2,3 +2,4 @@
 libclawguard.so
 target/
 admin.key.hash
+.worktrees/
