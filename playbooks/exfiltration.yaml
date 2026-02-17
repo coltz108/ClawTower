@@ -1,0 +1,15 @@
+playbooks:
+  exfiltration:
+    name: "Data Exfiltration Response"
+    description: "Containment for data exfiltration attempts — suspends the process, drops network, and revokes API keys"
+    actions:
+      - suspend_process
+      - drop_network
+      - revoke_api_keys
+    trigger_on:
+      - dns_exfil
+      - data_staging
+      - unauthorized_upload
+      - exfiltration
+      - data_exfil
+      - base64_encoded_transfer

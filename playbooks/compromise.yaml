@@ -1,0 +1,16 @@
+playbooks:
+  compromise:
+    name: "Full Agent Compromise Response"
+    description: "Maximum containment for suspected agent compromise — suspends, drops network, revokes keys, freezes fs, locks sudo"
+    actions:
+      - suspend_process
+      - drop_network
+      - revoke_api_keys
+      - freeze_filesystem
+      - lock_clawsudo
+    trigger_on:
+      - prompt_injection
+      - container_escape
+      - privilege_escalation
+      - shell_injection
+      - cognitive_tamper

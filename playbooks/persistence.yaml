@@ -1,0 +1,15 @@
+playbooks:
+  persistence:
+    name: "Persistence Mechanism Response"
+    description: "Containment for persistence attempts — suspends process, locks sudo, freezes filesystem"
+    actions:
+      - suspend_process
+      - lock_clawsudo
+      - freeze_filesystem
+    trigger_on:
+      - cron_persistence
+      - service_install
+      - startup_modification
+      - systemd_persist
+      - crontab_modify
+      - authorized_keys
