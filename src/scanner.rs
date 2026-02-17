@@ -217,7 +217,7 @@ pub fn scan_world_writable_files() -> ScanResult {
     let mut issues = Vec::new();
 
     for dir in &sensitive_dirs {
-        match run_cmd("find", &[dir, "-type", "f", "-perm", "0002", "2>/dev/null"]) {
+        match run_cmd("sh", &["-c", &format!("find {} -type f -perm 0002 2>/dev/null", dir)]) {
             Ok(output) => {
                 for file in output.lines() {
                     if !file.trim().is_empty() {
@@ -244,7 +244,7 @@ pub fn scan_suid_sgid_binaries() -> ScanResult {
     let mut sgid_files = Vec::new();
 
     // Find SUID files
-    if let Ok(output) = run_cmd("find", &["/", "-type", "f", "-perm", "-4000", "2>/dev/null"]) {
+    if let Ok(output) = run_cmd("sh", &["-c", "find / -type f -perm -4000 2>/dev/null"]) {
         for file in output.lines() {
             if !file.trim().is_empty() {
                 suid_files.push(file.trim().to_string());
@@ -253,7 +253,7 @@ pub fn scan_suid_sgid_binaries() -> ScanResult {
     }
 
     // Find SGID files  
-    if let Ok(output) = run_cmd("find", &["/", "-type", "f", "-perm", "-2000", "2>/dev/null"]) {
+    if let Ok(output) = run_cmd("sh", &["-c", "find / -type f -perm -2000 2>/dev/null"]) {
         for file in output.lines() {
             if !file.trim().is_empty() {
                 sgid_files.push(file.trim().to_string());
@@ -432,7 +432,7 @@ pub fn scan_open_file_descriptors() -> ScanResult {
     let mut issues = Vec::new();
 
     // Check system-wide open files
-    if let Ok(output) = run_cmd("lsof", &["-n", "|", "wc", "-l"]) {
+    if let Ok(output) = run_cmd("sh", &["-c", "lsof -n 2>/dev/null | wc -l"]) {
         if let Ok(count) = output.trim().parse::<u32>() {
             if count > 10000 {
                 issues.push(format!("High number of open files: {}", count));
