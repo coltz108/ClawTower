@@ -389,15 +389,37 @@ impl App {
             // Handle editing mode
             match key {
                 KeyCode::Enter => {
-                    // Confirm edit
-                    if let Some(ref mut config) = self.config {
-                        let section = &self.config_sections[self.config_selected_section];
-                        let field = &self.config_fields[self.config_selected_field];
-                        apply_field_to_config(config, section, &field.name, &self.config_edit_buffer);
-                        self.refresh_fields();
+                    // Validate before applying
+                    let field = &self.config_fields[self.config_selected_field];
+                    let value = &self.config_edit_buffer;
+
+                    let valid = match &field.field_type {
+                        FieldType::Number => value.parse::<u64>().is_ok(),
+                        FieldType::Bool => value == "true" || value == "false",
+                        FieldType::Text => true,
+                        FieldType::Action(_) => true,
+                    };
+
+                    if valid {
+                        if let Some(ref mut config) = self.config {
+                            let section = &self.config_sections[self.config_selected_section];
+                            let field = &self.config_fields[self.config_selected_field];
+                            apply_field_to_config(config, section, &field.name, &self.config_edit_buffer);
+                            self.refresh_fields();
+                        }
+                        self.config_editing = false;
+                        self.config_edit_buffer.clear();
+                    } else {
+                        self.config_saved_message = Some(format!(
+                            "❌ Invalid {}: \"{}\"",
+                            match &field.field_type {
+                                FieldType::Number => "number",
+                                FieldType::Bool => "boolean (true/false)",
+                                _ => "value",
+                            },
+                            value
+                        ));
                     }
-                    self.config_editing = false;
-                    self.config_edit_buffer.clear();
                 }
                 KeyCode::Esc => {
                     // Cancel edit
