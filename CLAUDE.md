@@ -271,6 +271,8 @@ Real-time file watcher using `notify` (inotify on Linux):
 - `is_persistence_critical()` — detects persistence attempts: `.service`/`.timer` in systemd user dirs → CRIT, `.desktop` in autostart → CRIT, non-`.sample` in `.git/hooks/` → CRIT. Alerts have "PERSISTENCE:" prefix.
 - `exclude_content_scan` config field — substring-based path exclusion for SecureClaw content scanning
 - Scan deduplication — same category+status results suppressed for 24 hours
+- **Injection marker scanning** — 21 prompt injection patterns checked on file diffs (`check_injection_markers()`), covers Tinman PI-*/II-*/MP-* categories
+- **Default watch paths** include MCP configs (`.mcp/`, `mcp-servers/`), Downloads dir, `memory/` dir
 
 ### `scanner.rs`
 

@@ -37,6 +37,13 @@ Quick map to every doc in this project. Start with what you need.
 | [TUNING.md](TUNING.md) | Tuning guide — reducing noise, adjusting thresholds, filter recipes |
 | [POC-RESULTS.md](POC-RESULTS.md) | Attack simulation POC results — 10 tests, 90% detection rate |
 
+## Design Plans
+
+| Document | What's in it |
+|----------|-------------|
+| [Tinman Coverage Design](plans/2026-02-17-tinman-coverage-design.md) | Gap analysis and design for Tinman eval harness attack coverage |
+| [Tinman Coverage Implementation](plans/2026-02-17-tinman-coverage-implementation.md) | Implementation plan for 7 Tinman attack categories |
+
 ## For AI Agents / Contributors
 
 | Document | What's in it |
