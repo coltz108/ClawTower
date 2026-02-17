@@ -47,18 +47,17 @@ jobs:
             sudo apt-get install -y libdbus-1-dev pkg-config
           fi
 
-      - name: Build (default features)
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build tray binary (x86_64 native)
+      - name: Build (x86_64 native)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
 
-      - name: Build tray binary (aarch64 via cross)
+      - name: Build (aarch64 via cross)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cross build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
+        run: |
+          cross build --release --target ${{ matrix.target }}
+          cross build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
 
       - name: Package binaries
         run: |
