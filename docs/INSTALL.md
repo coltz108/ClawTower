@@ -23,12 +23,20 @@
    ```
    Creates `libclawguard.so` in the project root
 
-3. **Configure `config.toml`:**
+3. **Configure ClawTower:**
+   - Don't edit `config.toml` directly — it's replaced on updates
+   - Instead, create drop-in overrides:
+     ```bash
+     # Customize via drop-in overrides (never touched by updates)
+     sudo mkdir -p /etc/clawtower/config.d
+     sudo nano /etc/clawtower/config.d/my-overrides.toml
+     ```
    - Set `watched_users` to the UIDs of your AI agent users (e.g., `["1000"]`), or set `watch_all_users = true`
    - Legacy: `watched_user` (single UID) is still supported but `watched_users` (list) is preferred
    - Set `slack.webhook_url` to an **independent** Slack webhook (not the agent's)
    - Optionally set `slack.backup_webhook_url` for failover
-   - See [ALERT-PIPELINE.md](ALERT-PIPELINE.md#tuning-alerts) for all config options
+   - See [CONFIGURATION.md](CONFIGURATION.md) for full config reference and the config.d/ layering system
+   - See [ALERT-PIPELINE.md](ALERT-PIPELINE.md#tuning-alerts) for alert tuning options
 
 4. **Ensure auditd is running:**
    ```bash
@@ -70,10 +78,9 @@ Creates `/etc/systemd/system/clawtower.service` with:
 **Step 4 — Set immutable attributes:**
 ```bash
 chattr +i /usr/local/bin/clawtower
-chattr +i /etc/clawtower/config.toml
 chattr +i /etc/systemd/system/clawtower.service
 ```
-After this, even root cannot modify these files without first removing the immutable flag — and the agent's `CAP_LINUX_IMMUTABLE` is stripped in step 6.
+After this, even root cannot modify these files without first removing the immutable flag — and the agent's `CAP_LINUX_IMMUTABLE` is stripped in step 6. Note: `config.toml` is **not** made immutable — customize via `/etc/clawtower/config.d/` instead (see [CONFIGURATION.md](CONFIGURATION.md)).
 
 **Step 5 — AppArmor profile:**
 Creates `/etc/apparmor.d/clawtower.deny-openclaw` which denies the `openclaw` user access to:
@@ -206,7 +213,7 @@ To modify ClawTower after installation:
 
 1. **Reboot into recovery mode** (physical access required)
 2. Mount filesystem read-write
-3. Remove immutable flags: `chattr -i /usr/local/bin/clawtower /etc/clawtower/config.toml /etc/systemd/system/clawtower.service`
+3. Remove immutable flags: `chattr -i /usr/local/bin/clawtower /etc/systemd/system/clawtower.service`
 4. Make changes
 5. Re-apply immutable flags: `chattr +i ...`
 6. Reboot normally
@@ -220,7 +227,6 @@ Requires physical access + recovery boot:
 ```bash
 # In recovery mode:
 chattr -i /usr/local/bin/clawtower
-chattr -i /etc/clawtower/config.toml
 chattr -i /etc/systemd/system/clawtower.service
 chattr -i /etc/sudoers.d/clawtower-deny
 chattr -i /usr/local/lib/clawtower/libclawguard.so

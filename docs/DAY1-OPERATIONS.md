@@ -263,6 +263,7 @@ If it doesn't exist, create one:
 | TUI | `clawtower tui` |
 | Manual scan | `clawtower scan` |
 | API health | `curl http://localhost:18791/health` |
-| Config | `/etc/clawtower/config.toml` |
+| Config (base) | `/etc/clawtower/config.toml` |
+| Config overrides | `/etc/clawtower/config.d/*.toml` — see [CONFIGURATION.md](CONFIGURATION.md) |
 | Policies | `/etc/clawtower/policies/` or `./policies/` |
 | Quarantine | `/etc/clawtower/quarantine/` |
