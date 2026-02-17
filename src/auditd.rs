@@ -43,6 +43,11 @@ pub const RECOMMENDED_AUDIT_RULES: &[&str] = &[
     // sendfile/copy_file_range monitoring — catches shutil.copyfile() and similar bypasses
     "-a always,exit -F arch=b64 -S sendfile -F uid=1000 -F success=1 -k clawtower_cred_read",
     "-a always,exit -F arch=b64 -S copy_file_range -F uid=1000 -F success=1 -k clawtower_cred_read",
+    // Crypto wallet file access monitoring (Tinman FT-* — financial transaction detection)
+    "-w /home/openclaw/.ethereum/ -p r -k clawtower_crypto_access",
+    "-w /home/openclaw/.config/solana/ -p r -k clawtower_crypto_access",
+    "-w /home/openclaw/.foundry/keystores/ -p r -k clawtower_crypto_access",
+    "-w /home/openclaw/.brownie/accounts/ -p r -k clawtower_crypto_access",
 ];
 
 use crate::alerts::{Alert, Severity};
@@ -384,6 +389,16 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
                 &format!("🔑 Credential access (expected): {} by {} (comm={})", detail, exe, comm),
             ));
         }
+    }
+
+    // Crypto wallet access detection via auditd (Tinman FT-*)
+    if line.contains("key=\"clawtower_crypto_access\"") || line.contains("key=clawtower_crypto_access") {
+        let exe = extract_field(line, "exe").unwrap_or("unknown");
+        return Some(Alert::new(
+            Severity::Critical,
+            "auditd:crypto_access",
+            &format!("🔑 Crypto wallet access by {}", exe),
+        ));
     }
 
     // Network connect() detection via auditd (T6.1)
@@ -1327,5 +1342,17 @@ mod tests {
     #[test]
     fn test_copy_file_range_syscall_name() {
         assert_eq!(syscall_name_aarch64(285), "copy_file_range");
+    }
+
+    #[test]
+    fn test_crypto_access_audit_key_detected() {
+        let line = r#"type=SYSCALL msg=audit(1234567890.123:456): arch=c00000b7 syscall=56 success=yes exit=3 a0=ffffff9c a1=7fff123 a2=0 a3=0 items=1 ppid=1234 pid=5678 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=(none) ses=1 comm="cat" exe="/usr/bin/cat" key="clawtower_crypto_access""#;
+        let event = parse_to_event(line, None).unwrap();
+        let alert = check_tamper_event(&event);
+        assert!(alert.is_some());
+        let alert = alert.unwrap();
+        assert_eq!(alert.severity, Severity::Critical);
+        assert!(alert.message.contains("Crypto wallet access"));
+        assert!(alert.message.contains("/usr/bin/cat"));
     }
 }
