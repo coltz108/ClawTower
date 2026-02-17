@@ -1232,6 +1232,39 @@ fn render_config_tab(f: &mut Frame, area: Rect, app: &App) {
             .border_style(Style::default().fg(fields_border))
             .title(title));
     f.render_widget(fields_list, chunks[1]);
+
+    // Dropdown overlay
+    if let Some(ref dropdown) = app.config_dropdown {
+        let max_option_len = dropdown.options.iter().map(|o| o.len()).max().unwrap_or(4);
+        let dropdown_width = (max_option_len as u16) + 4;
+        let dropdown_height = (dropdown.options.len() as u16) + 2;
+
+        // Position: right side of fields panel, at the field's Y offset
+        let fields_area = chunks[1]; // the right panel
+        let field_y_offset = dropdown.field_index as u16;
+        let x = fields_area.x + fields_area.width.saturating_sub(dropdown_width + 1);
+        let y = (fields_area.y + 1 + field_y_offset).min(
+            fields_area.y + fields_area.height.saturating_sub(dropdown_height + 1)
+        );
+
+        let dropdown_area = Rect::new(x, y, dropdown_width, dropdown_height);
+
+        let items: Vec<ListItem> = dropdown.options.iter().enumerate().map(|(i, opt)| {
+            let style = if i == dropdown.selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(format!(" {} ", opt)).style(style)
+        }).collect();
+
+        let list = List::new(items)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::Black)));
+        f.render_widget(list, dropdown_area);
+    }
 }
 
 fn render_detail_view(f: &mut Frame, area: Rect, alert: &Alert) {
