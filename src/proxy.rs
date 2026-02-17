@@ -154,6 +154,20 @@ async fn handle_request(
     req: Request<Body>,
     state: Arc<ProxyState>,
 ) -> Result<Response<Body>, hyper::Error> {
+    // Check if API keys are revoked by response engine
+    if std::path::Path::new("/var/run/clawtower/proxy.locked").exists() {
+        let _ = state.alert_tx.send(Alert::new(
+            Severity::Warning,
+            "proxy",
+            &format!("API request blocked — keys revoked by response engine: {} {}", req.method(), req.uri()),
+        )).await;
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"error":"API access revoked by ClawTower security policy. Contact administrator."}"#))
+            .unwrap());
+    }
+
     // Extract virtual key
     let virtual_key = match extract_virtual_key(&req) {
         Some(k) => k,
