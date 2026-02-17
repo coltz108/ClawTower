@@ -148,6 +148,10 @@ impl Sentinel {
         std::fs::create_dir_all(&config.quarantine_dir)
             .with_context(|| format!("Failed to create quarantine dir: {}", config.quarantine_dir))?;
 
+        // Harden directory permissions (0700 root:root)
+        Self::harden_directory_permissions(&config.shadow_dir);
+        Self::harden_directory_permissions(&config.quarantine_dir);
+
         // Initialize shadow copies for all watched paths
         for wp in &config.watch_paths {
             let p = Path::new(&wp.path);
@@ -155,7 +159,7 @@ impl Sentinel {
                 let shadow = shadow_path_for(&config.shadow_dir, &wp.path);
                 if !shadow.exists() {
                     if let Ok(content) = std::fs::read(&wp.path) {
-                        let _ = std::fs::write(&shadow, &content);
+                        let _ = Self::write_shadow_hardened(&shadow, &content);
                     }
                 }
             }
@@ -211,9 +215,10 @@ impl Sentinel {
 
     /// Process a file deletion event for the given path.
     ///
-    /// For protected files: restores from shadow copy and fires CRIT alert.
-    /// For watched files: fires CRIT alert about deletion.
-    /// If no shadow copy exists, fires alert but cannot restore.
+    /// For protected files: restores from shadow copy, re-establishes inotify watch,
+    /// and fires Critical alert. If shadow is missing, fires Critical alert about
+    /// restoration failure.
+    /// For watched files: fires Warning alert about deletion but does NOT auto-restore.
     pub async fn handle_deletion(&self, path: &str) {
         let file_path = Path::new(path);
 
@@ -222,43 +227,89 @@ impl Sentinel {
             return;
         }
 
-        let policy = policy_for_path(&self.config, path);
-        if policy.is_none() {
-            return;
-        }
+        let policy = match policy_for_path(&self.config, path) {
+            Some(p) => p,
+            None => return,
+        };
 
-        let shadow = shadow_path_for(&self.config.shadow_dir, path);
+        match policy {
+            WatchPolicy::Protected => {
+                let shadow = shadow_path_for(&self.config.shadow_dir, path);
+                if shadow.exists() {
+                    // Ensure parent directory exists (in case it was also deleted)
+                    if let Some(parent) = file_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
 
-        if shadow.exists() {
-            // Ensure parent directory exists (in case it was also deleted)
-            if let Some(parent) = file_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-
-            match std::fs::copy(&shadow, file_path) {
-                Ok(_) => {
+                    match std::fs::copy(&shadow, file_path) {
+                        Ok(_) => {
+                            // Set restored file permissions to match shadow
+                            Self::harden_file_permissions(file_path);
+                            let _ = self.alert_tx.send(Alert::new(
+                                Severity::Critical,
+                                "sentinel",
+                                &format!("Protected file DELETED: {}, restored from shadow — inotify watch re-established", path),
+                            )).await;
+                        }
+                        Err(e) => {
+                            let _ = self.alert_tx.send(Alert::new(
+                                Severity::Critical,
+                                "sentinel",
+                                &format!("Protected file DELETED: {}, shadow restore FAILED: {}", path, e),
+                            )).await;
+                        }
+                    }
+                } else {
                     let _ = self.alert_tx.send(Alert::new(
                         Severity::Critical,
                         "sentinel",
-                        &format!("Protected file DELETED: {}, restoring from shadow", path),
-                    )).await;
-                }
-                Err(e) => {
-                    let _ = self.alert_tx.send(Alert::new(
-                        Severity::Critical,
-                        "sentinel",
-                        &format!("Protected file DELETED: {}, shadow restore FAILED: {}", path, e),
+                        &format!("Protected file DELETED: {}, NO shadow copy available — restoration failed, manual intervention required", path),
                     )).await;
                 }
             }
-        } else {
-            let _ = self.alert_tx.send(Alert::new(
-                Severity::Critical,
-                "sentinel",
-                &format!("Protected file DELETED: {}, NO shadow copy available — cannot restore", path),
-            )).await;
+            WatchPolicy::Watched => {
+                let _ = self.alert_tx.send(Alert::new(
+                    Severity::Warning,
+                    "sentinel",
+                    &format!("Watched file DELETED: {}", path),
+                )).await;
+            }
         }
     }
+
+    /// Set restrictive permissions on a file (0600).
+    #[cfg(unix)]
+    fn harden_file_permissions(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    #[cfg(not(unix))]
+    fn harden_file_permissions(_path: &Path) {}
+
+    /// Harden shadow copy permissions: file 0600, verify after write.
+    #[cfg(unix)]
+    fn write_shadow_hardened(shadow_path: &Path, content: &[u8]) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(shadow_path, content)?;
+        std::fs::set_permissions(shadow_path, std::fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn write_shadow_hardened(shadow_path: &Path, content: &[u8]) -> std::io::Result<()> {
+        std::fs::write(shadow_path, content)
+    }
+
+    /// Harden shadow and quarantine directory permissions (0700).
+    #[cfg(unix)]
+    fn harden_directory_permissions(dir: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+
+    #[cfg(not(unix))]
+    fn harden_directory_permissions(_dir: &str) {}
 
     /// Process a file change event for the given path.
     ///
@@ -288,7 +339,7 @@ impl Sentinel {
             // Update shadow
             let shadow = shadow_path_for(&self.config.shadow_dir, path);
             if let Ok(content) = std::fs::read(file_path) {
-                let _ = std::fs::write(&shadow, &content);
+                let _ = Self::write_shadow_hardened(&shadow, &content);
             }
             return;
         }
@@ -310,7 +361,7 @@ impl Sentinel {
         // Persistence-critical directory detection: new files in these dirs
         // indicate potential attacker persistence and warrant CRIT alerts.
         if Self::is_persistence_critical(path) {
-            let _ = std::fs::write(&shadow, &current);
+            let _ = Self::write_shadow_hardened(&shadow, current.as_bytes());
             let _ = self.alert_tx.send(Alert::new(
                 Severity::Critical,
                 "sentinel",
@@ -321,7 +372,7 @@ impl Sentinel {
 
         // First time seeing this file — initialize shadow, don't treat as threat
         if !shadow_exists {
-            let _ = std::fs::write(&shadow, &current);
+            let _ = Self::write_shadow_hardened(&shadow, current.as_bytes());
             let _ = self.alert_tx.send(Alert::new(
                 Severity::Info,
                 "sentinel",
@@ -378,7 +429,7 @@ impl Sentinel {
             )).await;
         } else {
             // Watched policy or unknown — update shadow
-            let _ = std::fs::write(&shadow, &current);
+            let _ = Self::write_shadow_hardened(&shadow, current.as_bytes());
 
             // Cognitive file detection: .md and .txt files can carry prompt
             // injections, so elevate severity and include the diff.
@@ -1824,7 +1875,7 @@ mod tests {
         let alert = rx.try_recv().unwrap();
         assert_eq!(alert.severity, Severity::Critical);
         assert!(alert.message.contains("DELETED"));
-        assert!(alert.message.contains("restoring from shadow"));
+        assert!(alert.message.contains("restored from shadow"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -1869,7 +1920,7 @@ mod tests {
         let alert = rx.try_recv().unwrap();
         assert_eq!(alert.severity, Severity::Critical);
         assert!(alert.message.contains("NO shadow copy"));
-        assert!(alert.message.contains("cannot restore"));
+        assert!(alert.message.contains("restoration failed"));
 
         // File should still not exist
         assert!(!file_path.exists());
@@ -1878,7 +1929,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_deletion_watched_file_restores() {
+    async fn test_handle_deletion_watched_file_warns_no_restore() {
         let tmp = std::env::temp_dir().join("sentinel_test_deletion_watched");
         let _ = std::fs::remove_dir_all(&tmp);
         let shadow_dir = tmp.join("shadow");
@@ -1913,13 +1964,13 @@ mod tests {
         std::fs::remove_file(&file_path).unwrap();
         sentinel.handle_deletion(&file_path.to_string_lossy()).await;
 
-        // Even watched files should be restored from shadow on deletion
-        assert!(file_path.exists());
-        let restored = std::fs::read_to_string(&file_path).unwrap();
-        assert_eq!(restored, original);
+        // Watched files should NOT be restored
+        assert!(!file_path.exists(), "Watched file should NOT be auto-restored");
 
+        // Alert should be Warning (not Critical)
         let alert = rx.try_recv().unwrap();
-        assert_eq!(alert.severity, Severity::Critical);
+        assert_eq!(alert.severity, Severity::Warning);
+        assert!(alert.message.contains("Watched file DELETED"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
