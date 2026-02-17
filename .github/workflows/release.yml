@@ -31,21 +31,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (aarch64)
+      - name: Install cross (aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Install D-Bus dev libs
+      - name: Install D-Bus dev libs (x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # cross uses Docker containers with proper sysroots for cross-compilation
-            cargo install cross --git https://github.com/cross-rs/cross
-          else
-            sudo apt-get install -y libdbus-1-dev pkg-config
-          fi
+          sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Build (x86_64 native)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
