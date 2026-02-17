@@ -107,6 +107,7 @@ Sources (auditd, network, falco, samhain, SSH, firewall, scanner, sentinel, prox
 | `api.rs` | HTTP API server (hyper, endpoints: `/api/status`, `/api/alerts`, `/api/security`, `/api/health`) |
 | `proxy.rs` | API key proxy with DLP scanning (virtual→real key mapping, SSN/credit card/AWS key detection) |
 | `update.rs` | Self-updater (GitHub releases, SHA-256 + Ed25519 signature verification, chattr dance) |
+| `config_merge.rs` | TOML config merge engine with `_add`/`_remove` list semantics for config.d/ overlay support |
 | `bin/clawsudo.rs` | Standalone sudo gatekeeper binary with YAML policy evaluation and Slack approval flow |
 
 ---
@@ -144,6 +145,18 @@ Also handles: JSONL log persistence, audit chain appending, JSONL log rotation (
 
 **Key struct:** `Aggregator` with `process(Alert) -> Option<Alert>`
 
+### `config_merge.rs`
+
+TOML overlay merge engine. Core function: `merge_toml(base, overlay)`.
+
+**Merge rules:**
+- Scalars: overlay wins
+- Tables: recursive field-by-field merge
+- Arrays: `field_add` appends, `field_remove` removes, plain `field` replaces entirely
+- `_add`/`_remove` suffixed keys are stripped after merge
+
+Used by `Config::load_with_overrides()` to apply config.d/ overlays.
+
 ### `config.rs`
 
 Deserializes TOML config into `Config` struct. Sections:
@@ -163,7 +176,9 @@ Deserializes TOML config into `Config` struct. Sections:
 - `sentinel` — `enabled`, `watch_paths[]` (path + patterns + policy), `quarantine_dir`, `shadow_dir`, `debounce_ms`, `scan_content`, `max_file_size_kb`
 - `auto_update` — `enabled`, `interval`
 
-**Key method:** `Config::load(path)`, `Config::save(path)`
+**Key method:** `Config::load(path)`, `Config::save(path)`, `Config::load_with_overrides(base_path, config_d)`
+
+`Config::load_with_overrides()` loads the base `config.toml`, then scans `config.d/` for `*.toml` overlay files, merges them alphabetically using `merge_toml()`, and deserializes the merged TOML into the `Config` struct. Config.toml is no longer immutable — file permissions (root:root 644) are sufficient.
 **Helper:** `GeneralConfig::effective_watched_users()` handles backward compat (`watched_user` singular → `watched_users` list)
 
 > ⚠️ **`watched_users` takes numeric UIDs** (e.g., `["1000"]`), not usernames. These are matched against auditd's `uid=` and `auid=` fields. Find a user's UID with `id -u <username>`.
@@ -208,6 +223,8 @@ Hardcoded behavioral threat detection with 5 categories:
 
 Has allowlists for safe hosts, normal system operations (`ip neigh`, `crontab -l`), and build tool suppression (cargo/gcc child processes don't trigger LD_PRELOAD bypass alerts).
 
+LD_PRELOAD env var detection added to `classify_behavior()` — checks raw audit record for `LD_PRELOAD=` before command parsing. Suppresses for ClawTower's own guard, build tool binaries/parents.
+
 ### `cognitive.rs`
 
 Protects AI agent identity files:
@@ -230,6 +247,8 @@ Pattern engine loading 4 JSON databases from `vendor/secureclaw/`:
 
 `check_command()` has a large `SUDO_ALLOWLIST` (100+ entries) for legitimate system commands that happen to match "sudo" patterns.
 
+Compiler toolchain allowlist: build tool parent/binary suppression for `STATIC_COMPILE_PATTERNS` and `COMPILER_PATTERNS` checks. gcc/as/ld as build tools no longer flagged as SEC_TAMPER.
+
 ### `sentinel.rs`
 
 Real-time file watcher using `notify` (inotify on Linux):
@@ -240,6 +259,10 @@ Real-time file watcher using `notify` (inotify on Linux):
 - Content scanning via SecureClaw if `scan_content: true`
 - Log rotation detection (skips changes when `.1`/`.gz`/`.0` siblings exist)
 - Debouncing (configurable, default 200ms)
+- `handle_deletion()` — detects file removal, auto-restores from shadow copy, fires CRITICAL alert. Bypasses debounce for immediate response.
+- `is_persistence_critical()` — detects persistence attempts: `.service`/`.timer` in systemd user dirs → CRIT, `.desktop` in autostart → CRIT, non-`.sample` in `.git/hooks/` → CRIT. Alerts have "PERSISTENCE:" prefix.
+- `exclude_content_scan` config field — substring-based path exclusion for SecureClaw content scanning
+- Scan deduplication — same category+status results suppressed for 24 hours
 
 ### `scanner.rs`
 
@@ -291,6 +314,10 @@ YAML-based detection policy engine (distinct from `clawsudo.rs` enforcement):
 - Actions: `critical`, `warning`, `info`, `block`
 - Highest-severity match wins
 - `clawsudo*.yaml` files are explicitly skipped (those are enforcement-only)
+- `enabled` field on `PolicyRule` (default: true, set to false to disable a rule without deleting it)
+- `PolicyEngine::merge_rules(base, overrides)` — name-based merge, same name = override replaces entirely
+- `PolicyEngine::load()` now sorts `default.yaml` first, then alphabetical, merges by name
+- `PolicyFile` is now `pub(crate)` for test access
 
 ### `proxy.rs`
 
@@ -392,6 +419,13 @@ Background task checking GitHub releases. Flow:
 - Stored at `/etc/clawtower/admin.key.hash`
 - Rate limited: 3 failures → 1 hour lockout
 - Used for: self-update (custom binary only), uninstall, admin socket commands
+
+### Config Layering
+
+ClawTower uses a layered configuration pattern throughout:
+- **Config:** base `config.toml` + `config.d/*.toml` overlays (scalar replace, list `_add`/`_remove`)
+- **Policies:** `default.yaml` + user `*.yaml` files (name-based rule merge, `enabled: false` to disable)
+- Updates replace base files, never touch user overrides
 
 ### Audit Chain
 
