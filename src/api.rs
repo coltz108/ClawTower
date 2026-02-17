@@ -20,7 +20,7 @@ use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::alerts::{Alert, Severity};
-use crate::response::{PendingStatus, ResponseRequest, SharedPendingActions};
+use crate::response::{ResponseRequest, SharedPendingActions};
 
 /// Thread-safe ring buffer of alerts for the API.
 ///

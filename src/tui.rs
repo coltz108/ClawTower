@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 
 use crate::alerts::{Alert, AlertStore, Severity};
 use crate::config::Config;
-use crate::response::{PendingAction, PendingStatus, ResponseRequest, SharedPendingActions};
+use crate::response::{PendingStatus, ResponseRequest, SharedPendingActions};
 
 #[allow(dead_code)]
 pub enum TuiEvent {

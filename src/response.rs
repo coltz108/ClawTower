@@ -101,6 +101,7 @@ pub enum PendingStatus {
 
 /// A response playbook — a preconfigured bundle of containment actions.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct Playbook {
     /// Human-readable name.
     pub name: String,
@@ -149,6 +150,7 @@ pub fn load_playbooks(dir: &Path) -> Vec<(String, Playbook)> {
 // ── Gate Request (for clawsudo/proxy integration) ────────────────────────────
 
 /// A gate request from clawsudo or the proxy, waiting for approval.
+#[allow(dead_code)]
 pub struct GateRequest {
     /// The pending action ID this gate is associated with.
     pub action_id: String,
@@ -158,6 +160,7 @@ pub struct GateRequest {
 
 /// The decision for a gated request.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum GateDecision {
     Approved,
     Denied { reason: String },
@@ -178,6 +181,7 @@ pub enum ResponseRequest {
     /// Evaluate an alert and create a pending action if it matches a playbook.
     EvaluateAlert(Alert),
     /// A gate request from clawsudo/proxy — block until approved or denied.
+    #[allow(dead_code)]
     GateAction {
         alert: Alert,
         actions: Vec<ContainmentAction>,
