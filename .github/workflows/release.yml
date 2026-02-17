@@ -41,8 +41,8 @@ jobs:
         run: |
           sudo apt-get update
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            # Cross-compile: use cross tool with Docker for proper sysroot
-            cargo install cross --git https://github.com/cross-rs/cross || true
+            # cross uses Docker containers with proper sysroots for cross-compilation
+            cargo install cross --git https://github.com/cross-rs/cross
           else
             sudo apt-get install -y libdbus-1-dev pkg-config
           fi
@@ -54,16 +54,11 @@ jobs:
 
       - name: Build tray binary (x86_64 native)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray || echo "::warning::Tray build failed (optional)"
+        run: cargo build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
 
       - name: Build tray binary (aarch64 via cross)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          if command -v cross &>/dev/null; then
-            cross build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray || echo "::warning::Tray cross-build failed (optional)"
-          else
-            echo "::warning::cross not available, skipping aarch64 tray build"
-          fi
+        run: cross build --release --target ${{ matrix.target }} --features tray --bin clawtower-tray
 
       - name: Package binaries
         run: |

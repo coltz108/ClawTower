@@ -15,8 +15,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install D-Bus dev libs
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
       - name: Build
         run: cargo build --release
+
+      - name: Build tray binary
+        run: cargo build --release --features tray --bin clawtower-tray
 
       - name: Test
         run: cargo test
