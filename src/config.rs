@@ -254,14 +254,19 @@ pub struct ApiConfig {
     pub enabled: bool,
     pub bind: String,
     pub port: u16,
+    /// Bearer token for API authentication. If set, all requests must include
+    /// `Authorization: Bearer <token>`. If empty, API is unauthenticated.
+    #[serde(default)]
+    pub auth_token: String,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            bind: "0.0.0.0".to_string(),
+            bind: "127.0.0.1".to_string(),
             port: 18791,
+            auth_token: String::new(),
         }
     }
 }
