@@ -27,6 +27,7 @@ pub enum BehaviorCategory {
     SecurityTamper,
     Reconnaissance,
     SideChannel,
+    FinancialTheft,
     #[allow(dead_code)]
     SecureClawMatch,
 }
@@ -39,6 +40,7 @@ impl fmt::Display for BehaviorCategory {
             BehaviorCategory::SecurityTamper => write!(f, "SEC_TAMPER"),
             BehaviorCategory::Reconnaissance => write!(f, "RECON"),
             BehaviorCategory::SideChannel => write!(f, "SIDE_CHAN"),
+            BehaviorCategory::FinancialTheft => write!(f, "FIN_THEFT"),
             BehaviorCategory::SecureClawMatch => write!(f, "SC_MATCH"),
         }
     }
@@ -179,6 +181,51 @@ const CONTAINER_ESCAPE_PATTERNS: &[&str] = &[
 
 /// Container escape binaries
 const CONTAINER_ESCAPE_BINARIES: &[&str] = &["nsenter", "unshare", "runc", "ctr", "crictl"];
+
+/// Crypto wallet file paths — access by agent is suspicious
+const CRYPTO_WALLET_PATHS: &[&str] = &[
+    ".ethereum/keystore",
+    ".ethereum/geth/nodekey",
+    ".config/solana/id.json",
+    ".gnosis/keystores",
+    ".brownie/accounts",
+    ".foundry/keystores",
+    "wallet.json",
+    "keystore.json",
+    ".env.local",
+];
+
+/// Command-line patterns indicating crypto key/seed access
+const CRYPTO_KEY_PATTERNS: &[&str] = &[
+    "private_key",
+    "privatekey",
+    "secret_key",
+    "secretkey",
+    "mnemonic",
+    "seed_phrase",
+    "seed phrase",
+    "keystore",
+    "PRIVATE_KEY=",
+    "SECRET_KEY=",
+    "MNEMONIC=",
+    "eth_sendTransaction",
+    "eth_signTransaction",
+    "eth_sendRawTransaction",
+    "solana transfer",
+    "cast send",
+    "cast wallet",
+];
+
+/// Crypto CLI tools — usage by agent is suspicious
+const CRYPTO_CLI_TOOLS: &[&str] = &[
+    "cast",
+    "forge",
+    "solana-keygen",
+    "solana",
+    "ethkey",
+    "geth account",
+    "brownie",
+];
 
 /// Persistence-related binaries
 const PERSISTENCE_BINARIES: &[&str] = &["crontab", "at", "atq", "atrm", "batch"];
@@ -1114,6 +1161,23 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
     // perf_event_open can be used for cache timing attacks
     if event.syscall_name == "perf_event_open" {
         return Some((BehaviorCategory::SideChannel, Severity::Warning));
+    }
+
+    // --- CRITICAL: Financial / Crypto theft ---
+    for path in CRYPTO_WALLET_PATHS {
+        if cmd.contains(path) {
+            return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+        }
+    }
+    for pattern in CRYPTO_KEY_PATTERNS {
+        if cmd_lower.contains(&pattern.to_lowercase()) {
+            return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+        }
+    }
+    for tool in CRYPTO_CLI_TOOLS {
+        if cmd_lower.starts_with(tool) || cmd_lower.contains(&format!("/{}", tool)) {
+            return Some((BehaviorCategory::FinancialTheft, Severity::Warning));
+        }
     }
 
     None
@@ -3117,6 +3181,61 @@ mod tests {
         let event = make_exec_event(&["cat", "/etc/shadow"]);
         let result = classify_behavior(&event);
         assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    // === Financial Transaction Detection (Tinman FT-*) ===
+
+    #[test]
+    fn test_crypto_wallet_access_detected() {
+        let event = make_exec_event(&["cat", "/home/user/.ethereum/keystore/key.json"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+        let (cat, sev) = result.unwrap();
+        assert_eq!(cat, BehaviorCategory::FinancialTheft);
+        assert_eq!(sev, Severity::Critical);
+    }
+
+    #[test]
+    fn test_private_key_env_var_detected() {
+        let event = make_exec_event(&["export", "PRIVATE_KEY=0xdeadbeef"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert_eq!(cat, BehaviorCategory::FinancialTheft);
+    }
+
+    #[test]
+    fn test_eth_send_transaction_detected() {
+        let event = make_exec_event(&["curl", "-X", "POST", "--data", "{\"method\":\"eth_sendTransaction\"}"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert_eq!(cat, BehaviorCategory::FinancialTheft);
+    }
+
+    #[test]
+    fn test_foundry_cast_send_detected() {
+        let event = make_exec_event(&["cast", "send", "0x1234", "transfer(address,uint256)"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert_eq!(cat, BehaviorCategory::FinancialTheft);
+    }
+
+    #[test]
+    fn test_solana_transfer_detected() {
+        let event = make_exec_event(&["solana", "transfer", "recipient", "100"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_mnemonic_grep_detected() {
+        let event = make_exec_event(&["grep", "-r", "mnemonic", "/home/user/.env"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert_eq!(cat, BehaviorCategory::FinancialTheft);
     }
 }
 
