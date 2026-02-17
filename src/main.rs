@@ -565,21 +565,6 @@ async fn async_main() -> Result<()> {
     // Create shared alert store for API
     let alert_store = api::new_shared_store(1000);
 
-    // Spawn API server if enabled
-    if config.api.enabled {
-        let store = alert_store.clone();
-        let bind = config.api.bind.clone();
-        let port = config.api.port;
-        let auth_token = config.api.auth_token.clone();
-        let api_pending = pending_store.clone();
-        let api_resp_tx = response_tx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = api::run_api_server(&bind, port, store, auth_token, api_pending, api_resp_tx).await {
-                eprintln!("API server error: {}", e);
-            }
-        });
-    }
-
     // Spawn aggregator (sits between raw sources and TUI/Slack)
     let agg_config = AggregatorConfig::default();
     let min_slack = min_slack_level;
@@ -615,6 +600,21 @@ async fn async_main() -> Result<()> {
     } else {
         None
     };
+
+    // Spawn API server if enabled (after pending_store and response_tx are ready)
+    if config.api.enabled {
+        let store = alert_store.clone();
+        let bind = config.api.bind.clone();
+        let port = config.api.port;
+        let auth_token = config.api.auth_token.clone();
+        let api_pending = pending_store.clone();
+        let api_resp_tx = response_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = api::run_api_server(&bind, port, store, auth_token, api_pending, api_resp_tx).await {
+                eprintln!("API server error: {}", e);
+            }
+        });
+    }
 
     // Tee aggregated alerts to response engine (warnings+ get forwarded)
     let alert_rx = if let Some(ref resp_tx) = response_tx {
