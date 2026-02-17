@@ -911,6 +911,23 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
             "acm.us-east-1.amazonaws.com",
             "cloudfront.amazonaws.com",
         ];
+        // --- CRITICAL: Financial / Crypto theft (check before exfil to prioritize) ---
+        for path in CRYPTO_WALLET_PATHS {
+            if cmd.contains(path) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+            }
+        }
+        for pattern in CRYPTO_KEY_PATTERNS {
+            if cmd_lower.contains(&pattern.to_lowercase()) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+            }
+        }
+        for tool in CRYPTO_CLI_TOOLS {
+            if cmd_lower.starts_with(tool) || cmd_lower.contains(&format!("/{}", tool)) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Warning));
+            }
+        }
+
         if EXFIL_COMMANDS.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
             let full_cmd_lower = args.join(" ").to_lowercase();
             let is_safe = SAFE_HOSTS.iter().any(|&h| full_cmd_lower.contains(h));
@@ -1203,25 +1220,8 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         return Some((BehaviorCategory::SideChannel, Severity::Warning));
     }
 
-    // --- CRITICAL: Financial / Crypto theft ---
+    // --- WARNING: MCP config tampering via command ---
     if let Some(ref cmd) = event.command {
-        let cmd_lower = cmd.to_lowercase();
-        for path in CRYPTO_WALLET_PATHS {
-            if cmd.contains(path) {
-                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
-            }
-        }
-        for pattern in CRYPTO_KEY_PATTERNS {
-            if cmd_lower.contains(&pattern.to_lowercase()) {
-                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
-            }
-        }
-        for tool in CRYPTO_CLI_TOOLS {
-            if cmd_lower.starts_with(tool) || cmd_lower.contains(&format!("/{}", tool)) {
-                return Some((BehaviorCategory::FinancialTheft, Severity::Warning));
-            }
-        }
-        // Also catch write commands targeting MCP configs
         for pattern in MCP_TAMPER_PATTERNS {
             if cmd.contains(pattern) {
                 let is_write = ["echo", "tee", "sed", "mv", "cp", "cat >", ">>", "install"]
