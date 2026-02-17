@@ -18,8 +18,8 @@ fn get_ufw_status() -> Result<String, String> {
         .output()
         .map_err(|e| format!("Failed to run ufw: {}", e))?;
 
-    if !output.status.success() {
-        // Try with sudo
+    if !output.status.success() && unsafe { libc::getuid() } != 0 {
+        // Try with sudo (only if not already root — NoNewPrivileges blocks sudo)
         let output = Command::new("sudo")
             .args(["ufw", "status", "verbose"])
             .output()

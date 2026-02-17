@@ -4,3 +4,4 @@ target/
 admin.key.hash
 .worktrees/
 release-signing-key.private
+ClawTower-keyboard/

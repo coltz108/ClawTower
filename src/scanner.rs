@@ -151,6 +151,10 @@ fn run_cmd_with_sudo(cmd: &str, args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
+    // Skip sudo fallback if already root (NoNewPrivileges=yes blocks sudo)
+    if unsafe { libc::getuid() } == 0 {
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
     // Try with sudo
     let mut sudo_args = vec![cmd];
     sudo_args.extend_from_slice(args);

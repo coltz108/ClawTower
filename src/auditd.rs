@@ -444,8 +444,15 @@ pub async fn tail_audit_log(
     use tokio::time::{sleep, Duration};
 
     let mut file = File::open(path)?;
-    file.seek(SeekFrom::End(0))?;
+    // Seek to last 64KB instead of EOF to catch events during downtime/crash-loops
+    if file.seek(SeekFrom::End(-65536)).is_err() {
+        // File smaller than 64KB, seek to start
+        file.seek(SeekFrom::Start(0))?;
+    }
     let mut reader = BufReader::new(file);
+    // Skip partial first line after seeking mid-file
+    let mut discard = String::new();
+    let _ = reader.read_line(&mut discard);
     let mut line = String::new();
 
     loop {
@@ -514,8 +521,15 @@ pub async fn tail_audit_log_full(
     use tokio::time::{sleep, Duration};
 
     let mut file = File::open(path)?;
-    file.seek(SeekFrom::End(0))?;
+    // Seek to last 64KB instead of EOF to catch events during downtime/crash-loops
+    if file.seek(SeekFrom::End(-65536)).is_err() {
+        // File smaller than 64KB, seek to start
+        file.seek(SeekFrom::Start(0))?;
+    }
     let mut reader = BufReader::new(file);
+    // Skip partial first line after seeking mid-file
+    let mut discard = String::new();
+    let _ = reader.read_line(&mut discard);
     let mut line = String::new();
 
     loop {

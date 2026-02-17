@@ -349,7 +349,8 @@ async fn async_main() -> Result<()> {
         .map(|s| PathBuf::from(s.as_str()))
         .unwrap_or_else(|| PathBuf::from("/etc/clawtower/config.toml"));
 
-    let headless = run_args.iter().any(|a| a.as_str() == "--headless");
+    let headless = run_args.iter().any(|a| a.as_str() == "--headless")
+        || unsafe { libc::isatty(0) == 0 };
 
     // If running in TUI mode, stop the background service to avoid port/socket conflicts
     if !headless {
