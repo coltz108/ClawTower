@@ -241,12 +241,12 @@ if [[ "$MODE" == "upgrade" ]]; then
     mkdir -p "$TMPDIR/policies"
     curl -sSL -f -o "$TMPDIR/policies/default.yaml" "https://raw.githubusercontent.com/$REPO/$VERSION/policies/default.yaml" 2>/dev/null || true
 
-    # Download updated SecureClaw patterns
-    log "Downloading SecureClaw patterns..."
-    SECURECLAW_BASE="https://raw.githubusercontent.com/adversa-ai/secureclaw/main/secureclaw/skill/configs"
-    mkdir -p "$TMPDIR/secureclaw"
+    # Download BarnacleDefense pattern databases
+    log "Downloading BarnacleDefense patterns..."
+    BARNACLE_BASE="https://raw.githubusercontent.com/$REPO/$VERSION/patterns/barnacle"
+    mkdir -p "$TMPDIR/barnacle"
     for pattern in injection-patterns.json dangerous-commands.json privacy-rules.json supply-chain-ioc.json; do
-        curl -sSL -f -o "$TMPDIR/secureclaw/$pattern" "$SECURECLAW_BASE/$pattern" 2>/dev/null && \
+        curl -sSL -f -o "$TMPDIR/barnacle/$pattern" "$BARNACLE_BASE/$pattern" 2>/dev/null && \
             log "  ✓ $pattern" || warn "  ✗ $pattern (non-fatal)"
     done
 
@@ -327,9 +327,10 @@ TRAYEOF
         fi
     fi
 
-    # Update SecureClaw patterns (always overwrite — these are upstream)
-    for f in "$TMPDIR"/secureclaw/*.json; do
-        [[ -f "$f" ]] && cp "$f" "/etc/clawtower/secureclaw/"
+    # Update BarnacleDefense patterns
+    mkdir -p "/etc/clawtower/barnacle"
+    for f in "$TMPDIR"/barnacle/*.json; do
+        [[ -f "$f" ]] && cp "$f" "/etc/clawtower/barnacle/"
     done
 
     # Update default policy
@@ -408,7 +409,7 @@ echo -e "${GREEN}${BOLD}  🛡️  ClawTower Installer                          
 echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  This installer will:"
-echo -e "  ${BOLD}1.${NC} Download ClawTower binaries + SecureClaw patterns"
+echo -e "  ${BOLD}1.${NC} Download ClawTower binaries + BarnacleDefense patterns"
 echo -e "  ${BOLD}2.${NC} Let you configure before anything is locked down"
 echo -e "  ${BOLD}3.${NC} Lock the installation (immutable — requires recovery to undo)"
 echo ""
@@ -458,12 +459,12 @@ mkdir -p "$TMPDIR/policies"
 curl -sSL -f -o "$TMPDIR/policies/default.yaml" "https://raw.githubusercontent.com/$REPO/$VERSION/policies/default.yaml" 2>/dev/null || true
 curl -sSL -f -o "$TMPDIR/policies/clawsudo.yaml" "https://raw.githubusercontent.com/$REPO/$VERSION/policies/clawsudo.yaml" 2>/dev/null || true
 
-# ── Download SecureClaw patterns ──────────────────────────────────────────────
-log "Downloading SecureClaw pattern databases..."
-SECURECLAW_BASE="https://raw.githubusercontent.com/adversa-ai/secureclaw/main/secureclaw/skill/configs"
-mkdir -p "$TMPDIR/secureclaw"
+# ── Download BarnacleDefense patterns ─────────────────────────────────────────
+log "Downloading BarnacleDefense pattern databases..."
+BARNACLE_BASE="https://raw.githubusercontent.com/$REPO/$VERSION/patterns/barnacle"
+mkdir -p "$TMPDIR/barnacle"
 for pattern in injection-patterns.json dangerous-commands.json privacy-rules.json supply-chain-ioc.json; do
-    curl -sSL -f -o "$TMPDIR/secureclaw/$pattern" "$SECURECLAW_BASE/$pattern" 2>/dev/null && \
+    curl -sSL -f -o "$TMPDIR/barnacle/$pattern" "$BARNACLE_BASE/$pattern" 2>/dev/null && \
         log "  ✓ $pattern" || \
         warn "  ✗ $pattern (non-fatal)"
 done
@@ -501,7 +502,7 @@ fi
 
 # ── Create directories and install files (NOT locked down yet) ────────────────
 log "Setting up directories..."
-mkdir -p /etc/clawtower/policies /etc/clawtower/secureclaw /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine /var/log/clawtower /var/run/clawtower
+mkdir -p /etc/clawtower/policies /etc/clawtower/barnacle /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine /var/log/clawtower /var/run/clawtower
 # Shadow and quarantine dirs should not be world-readable (info leak prevention)
 chmod 700 /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine
 
@@ -589,9 +590,9 @@ for f in "$TMPDIR"/policies/*.yaml; do
     [[ -f "/etc/clawtower/policies/$fname" ]] || cp "$f" "/etc/clawtower/policies/$fname"
 done
 
-# Install SecureClaw patterns
-for f in "$TMPDIR"/secureclaw/*.json; do
-    [[ -f "$f" ]] && cp "$f" "/etc/clawtower/secureclaw/"
+# Install BarnacleDefense patterns
+for f in "$TMPDIR"/barnacle/*.json; do
+    [[ -f "$f" ]] && cp "$f" "/etc/clawtower/barnacle/"
 done
 
 # Install systemd service
@@ -696,17 +697,17 @@ else
     log "API enabled on port 18791"
 fi
 
-# ── SecureClaw ────────────────────────────────────────────────────────────────
+# ── BarnacleDefense ───────────────────────────────────────────────────────────
 echo ""
-echo -e "  ${BOLD}SecureClaw${NC} (prompt injection + supply chain detection patterns)"
-echo -en "  ${CYAN}Enable SecureClaw? [Y/n]: ${NC}" > /dev/tty
+echo -e "  ${BOLD}BarnacleDefense${NC} (prompt injection + supply chain detection patterns)"
+echo -en "  ${CYAN}Enable BarnacleDefense? [Y/n]: ${NC}" > /dev/tty
 read -r sc_input < /dev/tty
 if [[ "$sc_input" =~ ^[nN] ]]; then
-    log "SecureClaw disabled"
+    log "BarnacleDefense disabled"
 else
-    sed -i '/^\[secureclaw\]/,/^$/s/^enabled = false/enabled = true/' "$CONF"
-    sed -i "s|^vendor_dir = .*|vendor_dir = \"/etc/clawtower/secureclaw\"|" "$CONF"
-    log "SecureClaw enabled"
+    sed -i '/^\[barnacle\]/,/^$/s/^enabled = false/enabled = true/' "$CONF"
+    sed -i "s|^vendor_dir = .*|vendor_dir = \"/etc/clawtower/barnacle\"|" "$CONF"
+    log "BarnacleDefense enabled"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -1001,5 +1002,5 @@ echo -e "  ${BOLD}Binaries:${NC}  /usr/local/bin/clawtower, /usr/local/bin/claws
 echo -e "  ${BOLD}Config:${NC}    /etc/clawtower/config.toml (immutable)"
 echo -e "  ${BOLD}Logs:${NC}      journalctl -u clawtower -f"
 echo -e "  ${BOLD}Status:${NC}    systemctl status clawtower"
-echo -e "  ${BOLD}Patterns:${NC}  /etc/clawtower/secureclaw/"
+echo -e "  ${BOLD}Patterns:${NC}  /etc/clawtower/barnacle/"
 echo ""

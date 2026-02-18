@@ -121,7 +121,7 @@ pub static CONTROL_MAPPINGS: &[ControlMapping] = &[
         mitre_attack: &["T1204", "T1566"],
     },
     ControlMapping {
-        clawtower_category: "secureclaw:supply_chain",
+        clawtower_category: "barnacle:supply_chain",
         soc2_controls: &["CC6.8", "CC8.1"],
         nist_controls: &["SI-3", "SI-7"],
         cis_controls: &["2.7", "16.1"],
@@ -931,7 +931,7 @@ mod tests {
     #[test]
     fn test_supply_chain_categories_have_mappings() {
         assert!(lookup_controls("behavior:social_engineering").is_some());
-        assert!(lookup_controls("secureclaw:supply_chain").is_some());
+        assert!(lookup_controls("barnacle:supply_chain").is_some());
         assert!(lookup_controls("sentinel:skill_intake").is_some());
     }
 
