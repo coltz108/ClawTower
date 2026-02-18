@@ -37,6 +37,7 @@ pub struct ControlMapping {
     pub soc2_controls: &'static [&'static str],
     pub nist_controls: &'static [&'static str],
     pub cis_controls: &'static [&'static str],
+    pub mitre_attack: &'static [&'static str],
 }
 
 /// All known control mappings between ClawTower categories and compliance frameworks.
@@ -47,60 +48,70 @@ pub static CONTROL_MAPPINGS: &[ControlMapping] = &[
         soc2_controls: &["CC6.1", "CC7.2"],
         nist_controls: &["SC-7", "SI-4"],
         cis_controls: &["13.1"],
+        mitre_attack: &["T1048", "T1041"],
     },
     ControlMapping {
         clawtower_category: "behavior:privilege_escalation",
         soc2_controls: &["CC6.1", "CC6.3"],
         nist_controls: &["AC-6", "AU-12"],
         cis_controls: &["5.4"],
+        mitre_attack: &["T1548", "T1068"],
     },
     ControlMapping {
         clawtower_category: "sentinel:file_integrity",
         soc2_controls: &["CC8.1"],
         nist_controls: &["SI-7"],
         cis_controls: &["3.14"],
+        mitre_attack: &["T1565", "T1485"],
     },
     ControlMapping {
         clawtower_category: "scan:firewall_status",
         soc2_controls: &["CC6.6"],
         nist_controls: &["SC-7"],
         cis_controls: &["4.8"],
+        mitre_attack: &["T1562.004"],
     },
     ControlMapping {
         clawtower_category: "capability:envelope_violation",
         soc2_controls: &["CC6.1", "CC6.8"],
         nist_controls: &["AC-3", "AC-25"],
         cis_controls: &["6.1"],
+        mitre_attack: &["T1078"],
     },
     ControlMapping {
         clawtower_category: "audit_chain:tamper_detected",
         soc2_controls: &["CC7.2", "CC7.3"],
         nist_controls: &["AU-9", "AU-10"],
         cis_controls: &["8.11"],
+        mitre_attack: &["T1070"],
     },
     ControlMapping {
         clawtower_category: "behavior:reconnaissance",
         soc2_controls: &["CC6.1"],
         nist_controls: &["SI-4"],
         cis_controls: &["13.3"],
+        mitre_attack: &["T1082", "T1033"],
     },
     ControlMapping {
         clawtower_category: "behavior:persistence",
         soc2_controls: &["CC7.2"],
         nist_controls: &["SI-3", "SI-7"],
         cis_controls: &["2.7"],
+        mitre_attack: &["T1053", "T1546"],
     },
     ControlMapping {
         clawtower_category: "behavior:container_escape",
         soc2_controls: &["CC6.1", "CC6.6"],
         nist_controls: &["SC-7", "CM-7"],
         cis_controls: &["16.1"],
+        mitre_attack: &["T1611"],
     },
     ControlMapping {
         clawtower_category: "scan:suid_binaries",
         soc2_controls: &["CC6.1"],
         nist_controls: &["AC-6"],
         cis_controls: &["5.4"],
+        mitre_attack: &["T1548.001"],
     },
 ];
 
@@ -806,6 +817,26 @@ mod tests {
         assert_eq!(report.scanner_summary.pass_count, 2);
         assert_eq!(report.scanner_summary.warn_count, 1);
         assert_eq!(report.scanner_summary.fail_count, 1);
+    }
+
+    #[test]
+    fn test_control_mapping_has_mitre_attack() {
+        for mapping in CONTROL_MAPPINGS {
+            assert!(
+                !mapping.mitre_attack.is_empty(),
+                "mapping for {} should have at least one ATT&CK technique",
+                mapping.clawtower_category
+            );
+        }
+    }
+
+    #[test]
+    fn test_data_exfil_maps_to_t1048() {
+        let mapping = lookup_controls("behavior:data_exfiltration").unwrap();
+        assert!(
+            mapping.mitre_attack.contains(&"T1048"),
+            "data_exfiltration should map to T1048 (Exfiltration Over Alternative Protocol)"
+        );
     }
 
     #[test]

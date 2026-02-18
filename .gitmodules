@@ -1,3 +1,0 @@
-[submodule "vendor/secureclaw"]
-	path = vendor/secureclaw
-	url = https://github.com/adversa-ai/secureclaw.git
