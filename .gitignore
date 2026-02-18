@@ -5,5 +5,7 @@ admin.key.hash
 .worktrees/
 release-signing-key.private
 ClawTower-keyboard/
+scripts/deploy.sh
+scripts/pentest.sh
 libclawguard*.so
 test_interpose

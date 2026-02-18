@@ -161,6 +161,34 @@ cargo build --release         # Release (strip=true, lto=true, opt-level=z)
 
 **Install:** `curl -sSL .../oneshot-install.sh | sudo bash` or `clawtower setup --source --auto`. Scripts in `scripts/` directory.
 
+### Remote Deploy & Pentest
+
+Two gitignored scripts automate deploying to the target machine (`claw` = `192.168.1.85`):
+
+```bash
+./scripts/deploy.sh           # Deploy ARM binary to remote (sshpass as jr, chattr dance)
+./scripts/deploy.sh --build   # Cross-compile for aarch64 first, then deploy
+./scripts/pentest.sh           # Ship & run latest Red Lobster suite as openclaw
+./scripts/pentest.sh v7        # Run a specific version
+./scripts/pentest.sh v8 flag15 # Pass args to run-all.sh
+```
+
+- `deploy.sh` cross-compiles for `aarch64-unknown-linux-gnu`, uploads binary + config + policies, stops the service, does the `chattr -i` → replace → `chattr +i` immutable dance, restarts. **Gitignored** (contains credentials).
+- `pentest.sh` auto-detects the highest `redlobster-v*-run-all.sh`, ships all scripts for that version + `redlobster-lib.sh` to the remote, and runs as `openclaw`. **Gitignored** (contains credentials).
+
+### Pre-Push Checklist
+
+**Before pushing, always run deploy + pentest to verify on the target machine:**
+
+```bash
+cargo test                     # 1. Unit tests pass locally
+cargo build --release --target aarch64-unknown-linux-gnu  # 2. Release build succeeds
+./scripts/deploy.sh            # 3. Deploy to remote
+./scripts/pentest.sh           # 4. Red Lobster pentest suite passes on remote
+```
+
+Do not push until steps 3 and 4 succeed. If the pentest reveals regressions, fix them before pushing.
+
 ---
 
 ## Common Tasks for LLMs
