@@ -343,8 +343,8 @@ async fn handle_request(
     }
 }
 
-fn hyper_tls_connector() -> hyper::client::HttpConnector {
-    hyper::client::HttpConnector::new()
+fn hyper_tls_connector() -> hyper_tls::HttpsConnector<hyper::client::HttpConnector> {
+    hyper_tls::HttpsConnector::new()
 }
 
 #[cfg(test)]
@@ -750,5 +750,14 @@ mod tests {
         assert!(check_credential_access(&mapping, &state, "/v1/messages").is_ok());
         assert!(check_credential_access(&mapping, &state, "/v1/completions").is_ok());
         assert!(check_credential_access(&mapping, &state, "/anything/at/all").is_ok());
+    }
+
+    // ═══════════════════════ TLS CONNECTOR TESTS ═══════════════════════
+
+    #[test]
+    fn test_tls_connector_supports_https() {
+        let connector = hyper_tls_connector();
+        let _client: Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> =
+            Client::builder().build(connector);
     }
 }
