@@ -11,6 +11,7 @@
 //! (as opposed to approval requests, which are interactive).
 
 pub mod discord;
+pub mod slack;
 pub mod tray;
 pub mod tui;
 
