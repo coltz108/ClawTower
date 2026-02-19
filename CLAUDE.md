@@ -59,8 +59,6 @@ Modules are organized into directories under `src/`. A few top-level files remai
 |--------|---------|
 | `main.rs` | Entry point, CLI dispatch, spawns all tasks, wires channels |
 | `cli.rs` | CLI argument parsing and subcommand definitions |
-| `compliance.rs` | Compliance framework checks |
-| `netpolicy.rs` | Network policy engine (allowlist/blocklist mode for outbound connections) |
 
 #### `agent/` — AI agent integration
 
@@ -119,7 +117,7 @@ Modules are organized into directories under `src/`. A few top-level files remai
 | `mod.rs` | Detection module orchestration |
 | `behavior_adapter.rs` | Adapter bridging behavior rules into the detection pipeline |
 | `traits.rs` | Detection engine trait definitions |
-| `policy.rs` | YAML-based policy engine for detection (distinct from clawsudo enforcement) |
+| `compliance.rs` | Compliance report generation (SOC 2, NIST 800-53, CIS Controls v8) |
 | `cognitive.rs` | Cognitive file protection — SHA-256 baselines for identity files (SOUL.md, etc.) |
 | `correlator.rs` | Cross-source event correlation |
 | `forensics.rs` | Forensic analysis utilities |
@@ -145,6 +143,13 @@ Modules are organized into directories under `src/`. A few top-level files remai
 | `api.rs` | HTTP API server (hyper, endpoints: `/api/status`, `/api/alerts`, `/api/security`, `/api/health`) |
 | `slack.rs` | Slack webhook notifier (primary + backup webhook, heartbeat) |
 | `tui_client.rs` | TUI client connection handling |
+
+#### `policy/` — Policy engines
+
+| Module | Purpose |
+|--------|---------|
+| `rules.rs` | YAML-based policy engine for detection (match criteria, actions, allowlisting) |
+| `network.rs` | Network policy enforcement (allowlist/blocklist mode for outbound connections) |
 
 #### `proxy/` — API key proxy
 
@@ -210,6 +215,14 @@ Modules are organized into directories under `src/`. A few top-level files remai
 | `clawsudo.rs` | Standalone sudo gatekeeper binary with YAML policy evaluation and Slack approval flow |
 | `clawtower-ctl.rs` | ClawTower control utility |
 | `clawtower-tray.rs` | System tray integration |
+
+#### `testing/` — Cross-module test suites (`#[cfg(test)]` only)
+
+| Module | Purpose |
+|--------|---------|
+| `adversarial.rs` | Adversarial attack pattern simulations |
+| `integration.rs` | Cross-module integration tests |
+| `benchmarks.rs` | Lightweight performance benchmarks |
 
 For detailed module internals, see `.docs/ARCHITECTURE.md` and `.docs/MONITORING-SOURCES.md`.
 
