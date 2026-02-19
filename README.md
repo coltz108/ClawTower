@@ -270,42 +270,86 @@ clawsudo apt-get update
 
 ## Architecture Overview
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                      ClawTower Core                        │
-│                                                            │
-│  ┌───────────────────┐  ┌──────────┐  ┌──────────┐        │
-│  │  Auditd Watcher   │  │ Sentinel │  │ Journald │ Sources│
-│  │ ┌───────────────┐ │  │ (inotify)│  │  Tailer  │        │
-│  │ │Behavior Engine│ │  └────┬─────┘  └────┬─────┘        │
-│  │ │BarnacleDefense│ │       │              │              │
-│  │ │Policy Engine  │ │  ┌────┴────┐   ┌────┴────┐         │
-│  │ └───────────────┘ │  │ Scanner │   │Firewall │         │
-│  └────────┬──────────┘  │  Loop   │   │ Monitor │         │
-│           │             └────┬────┘   └────┬────┘         │
-│           ▼                  ▼              ▼              │
-│  ┌──────────────────────────────────────────────────┐     │
-│  │            raw_tx Channel (mpsc, cap=1000)       │     │
-│  └──────────────────────┬───────────────────────────┘     │
-│                         ▼                                  │
-│  ┌──────────────────────────────────────────────────┐     │
-│  │             Alert Aggregator                      │     │
-│  │       (fuzzy dedup · rate-limit · suppress)       │     │
-│  └──────┬────────────┬────────────┬─────────────────┘     │
-│         ▼            ▼            ▼                        │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐                │
-│  │  Slack   │  │   TUI    │  │Audit Chain│  Outputs       │
-│  │ Notifier │  │Dashboard │  │  (log)    │                │
-│  └──────────┘  └──────────┘  └───────────┘                │
-│                                                            │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐                │
-│  │  REST    │  │  Proxy   │  │  Admin    │  Services      │
-│  │  API     │  │  (DLP)   │  │  Socket   │                │
-│  └──────────┘  └──────────┘  └───────────┘                │
-└────────────────────────────────────────────────────────────┘
+ClawTower uses a **three-ring defense model**: enforcement at the boundary, real-time detection in the middle, and periodic auditing as the outer sweep. Everything feeds into a single event pipeline that deduplicates, correlates, and routes alerts to humans.
+
+```mermaid
+graph TB
+    subgraph ACTORS["Who Triggers Events"]
+        AGENT["AI Agent<br/>(watched UID)"]
+        HUMAN["Human Admin<br/>(CLI / TUI / Slack)"]
+        SYSTEM["OS Kernel<br/>(auditd, inotify, iptables)"]
+    end
+
+    subgraph RING1["Ring 1 — Enforcement (Boundary)"]
+        direction LR
+        CLAWSUDO["clawsudo<br/>Sudo gatekeeper<br/>YAML policies ➜ allow/deny/ask"]
+        PROXY["API Proxy<br/>Virtual keys · DLP scan<br/>Prompt firewall (7 categories)"]
+    end
+
+    subgraph RING2["Ring 2 — Real-Time Detection"]
+        direction LR
+        AUDITD["Syscall Analysis<br/>Behavior (270 rules)<br/>Barnacle (4 pattern DBs)<br/>Policy · Envelope"]
+        FIM["File Integrity<br/>Sentinel (inotify)<br/>Cognitive baselines<br/>Falco · Samhain"]
+        NET["Network Analysis<br/>iptables parser<br/>Host allow/blocklist<br/>SSH monitor"]
+        MEM["Process Integrity<br/>Memory sentinel<br/>Log tamper detection"]
+    end
+
+    subgraph RING3["Ring 3 — Periodic Audit"]
+        SCANNERS["33 Security Scanners<br/>firewall · SSH · SUID · docker<br/>crontab · packages · persistence<br/>kernel · accounts · AppArmor · ..."]
+    end
+
+    subgraph PIPELINE["Event Pipeline"]
+        RAW["raw_tx<br/>(mpsc, cap=1000)"]
+        AGG["Aggregator<br/>fuzzy dedup · rate limit"]
+        CORR["Correlator<br/>cross-layer threat scoring<br/>300→600→900 thresholds"]
+        RESP["Response Engine<br/>Gate mode (block + ask)<br/>Reactive mode (contain)"]
+    end
+
+    subgraph OUTPUTS["Where Alerts Go"]
+        direction LR
+        TUI["TUI Dashboard<br/>(6 tabs)"]
+        SLACK["Slack<br/>Webhook alerts"]
+        API["REST API<br/>(4 endpoints)"]
+        CHAIN["Audit Chain<br/>HMAC SHA-256<br/>tamper-evident"]
+        SIEM["SIEM Export<br/>CEF · webhook · JSONL"]
+    end
+
+    subgraph TAMPER["Tamper Protection"]
+        direction LR
+        IMMUT["chattr +i<br/>immutable binaries"]
+        ADMINKEY["Admin key<br/>Argon2 · shown once<br/>never stored"]
+        LOCKFILES["Lockfiles<br/>cross-process<br/>containment"]
+    end
+
+    AGENT -->|"sudo cmd"| CLAWSUDO
+    AGENT -->|"API request"| PROXY
+    AGENT -->|"shell / files / net"| SYSTEM
+    HUMAN -->|"manage"| TUI
+    HUMAN -->|"approve / deny"| RESP
+
+    SYSTEM --> RING2
+    CLAWSUDO -->|"deny alert"| RAW
+    PROXY -->|"block / redact alert"| RAW
+
+    AUDITD --> RAW
+    FIM --> RAW
+    NET --> RAW
+    MEM --> RAW
+    SCANNERS -->|"every 60-300s"| RAW
+
+    RAW --> AGG
+    AGG --> CORR
+    AGG --> OUTPUTS
+    CORR -->|"Warning+"| RESP
+    RESP -->|"approved"| CONTAINMENT["Containment<br/>kill · suspend · drop net<br/>revoke keys · freeze FS<br/>lock clawsudo"]
+
+    TAMPER -.->|"protects"| RING1
+    TAMPER -.->|"protects"| CHAIN
 ```
 
-**Data flow:** The auditd watcher parses syscall events and runs them through behavior analysis, BarnacleDefense pattern matching, and policy evaluation *before* producing alerts. Other sources (sentinel, journald, scanner, firewall) produce alerts directly. All alerts flow through the `raw_tx` channel to the aggregator, which deduplicates and rate-limits before fanning out to Slack, TUI, REST API, and the hash-chained audit log. The admin socket accepts authenticated commands via Unix domain socket.
+**Three rings, one pipeline.** Ring 1 (clawsudo + proxy) blocks dangerous actions *before* they execute. Ring 2 (auditd, sentinel, network, memory) catches threats *as they happen*. Ring 3 (33 scanners) sweeps for drift and misconfigurations on a timer. All three rings feed alerts into the same `raw_tx` channel, where the aggregator deduplicates and rate-limits, the correlator scores cross-layer patterns, and the response engine decides whether to block (Gate) or contain (Reactive) — with human approval required for Critical actions.
+
+**Tamper protection** wraps the whole system: immutable binaries, an admin key that's never stored, and cross-process lockfiles that propagate containment even to standalone binaries like clawsudo.
 
 ### Detailed Architecture Diagram
 
