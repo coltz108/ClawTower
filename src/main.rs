@@ -64,6 +64,7 @@ mod policy;
 mod prompt_firewall;
 mod proxy;
 mod readiness;
+mod risk_latch;
 mod runtime;
 mod safe_cmd;
 mod safe_io;
