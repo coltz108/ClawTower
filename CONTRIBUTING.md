@@ -47,26 +47,29 @@ Without a CLA, every contributor retains exclusive copyright over their code, ma
 
 ### What Makes a Good Contribution
 
+Issues labeled [`good first issue`](https://github.com/ClawTower/ClawTower/labels/good%20first%20issue) are scoped and completable in a few hours.
+
 - **Bug fixes** with a test that reproduces the issue
 - **New security scanners** — see `CLAUDE.md` "Adding a New Scanner" for the pattern
 - **New monitoring sources** — see `CLAUDE.md` "Adding a New Monitoring Source"
-- **Detection rules** — new behavioral patterns in `src/behavior/mod.rs`
+- **Detection rules** — new behavioral patterns in the `src/behavior/` submodules
 - **Documentation** improvements
 - **Policy templates** — new YAML policies in `policies/`
 
 ### Architecture Notes
 
-- Binary crate only (`src/main.rs`), no `lib.rs`
-- All modules declared as `mod` in `main.rs`
+- Binary crate with modules organized into directories under `src/`
 - Async runtime is Tokio — monitoring sources are spawned tasks
 - Alerts flow through `mpsc::channel` → Aggregator → TUI/Slack/API/audit chain
 - See `CLAUDE.md` and `.docs/ARCHITECTURE.md` for full details
 
 ## Reporting Security Vulnerabilities
 
-**Do not open public issues for security vulnerabilities.**
+**Do not open public issues for security vulnerabilities.** See [SECURITY.md](SECURITY.md) for how to report them privately.
 
-Email security reports to the maintainer directly. You will receive an acknowledgment within 48 hours and a detailed response within 7 days.
+## Questions?
+
+Open a thread in [GitHub Discussions](https://github.com/ClawTower/ClawTower/discussions).
 
 ## Code of Conduct
 
@@ -74,4 +77,4 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ## License
 
-By contributing to ClawTower, you agree that your contributions will be licensed under the [GNU Affero General Public License v3.0](LICENSE) (or later), subject to the CLA terms above.
+ClawTower is [dual-licensed](LICENSE): AGPL-3.0 for open-source use, with a commercial license available for organizations that need it. By contributing, you agree that your contributions will be licensed under both, subject to the CLA terms above.

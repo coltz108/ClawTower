@@ -549,7 +549,9 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to get started, including the
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE) for details.
+ClawTower is licensed under **AGPL-3.0** — see [LICENSE](LICENSE). A commercial license is available for organizations that cannot comply with AGPL obligations — contact licensing@clawtower.dev.
+
+Contributors sign a [CLA](CONTRIBUTING.md) that enables dual-licensing. This is standard practice for projects like GitLab, Qt, and MongoDB.
 
 ---
 
