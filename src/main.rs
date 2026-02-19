@@ -844,7 +844,18 @@ async fn async_main() -> Result<()> {
             });
         } else {
             eprintln!("auditd monitor: skipping (no read access to {} — run as root for full monitoring)", path.display());
+            let _ = raw_tx.send(Alert::new(
+                Severity::Warning,
+                "startup",
+                &format!("Monitoring source 'auditd' unavailable: cannot read {} — blind spot active", path.display()),
+            )).await;
         }
+    } else {
+        let _ = raw_tx.send(Alert::new(
+            Severity::Warning,
+            "startup",
+            "Monitoring source 'auditd' disabled in config — syscall monitoring inactive",
+        )).await;
     }
 
     // Spawn network monitor (auto-detect journald vs file)
@@ -882,20 +893,40 @@ async fn async_main() -> Result<()> {
     if config.falco.enabled {
         let tx = raw_tx.clone();
         let path = PathBuf::from(&config.falco.log_path);
+        let startup_tx = raw_tx.clone();
+        let path_check = path.clone();
         tokio::spawn(async move {
             if let Err(e) = falco::tail_falco_log(&path, tx).await {
                 eprintln!("Falco monitor error: {}", e);
+                let _ = startup_tx.send(Alert::new(
+                    Severity::Warning,
+                    "startup",
+                    &format!("Monitoring source 'falco' failed: {} — blind spot active", e),
+                )).await;
             }
         });
+        if !path_check.exists() {
+            let _ = raw_tx.send(Alert::new(
+                Severity::Info,
+                "startup",
+                &format!("Falco log not found at {} — will monitor when available", path_check.display()),
+            )).await;
+        }
     }
 
     // Spawn Samhain log tail
     if config.samhain.enabled {
         let tx = raw_tx.clone();
         let path = PathBuf::from(&config.samhain.log_path);
+        let startup_tx = raw_tx.clone();
         tokio::spawn(async move {
             if let Err(e) = samhain::tail_samhain_log(&path, tx).await {
                 eprintln!("Samhain monitor error: {}", e);
+                let _ = startup_tx.send(Alert::new(
+                    Severity::Warning,
+                    "startup",
+                    &format!("Monitoring source 'samhain' failed: {} — blind spot active", e),
+                )).await;
             }
         });
     }
@@ -903,9 +934,15 @@ async fn async_main() -> Result<()> {
     // Spawn SSH login monitor
     if config.ssh.enabled {
         let tx = raw_tx.clone();
+        let startup_tx = raw_tx.clone();
         tokio::spawn(async move {
             if let Err(e) = journald::tail_journald_ssh(tx).await {
                 eprintln!("SSH monitor error: {}", e);
+                let _ = startup_tx.send(Alert::new(
+                    Severity::Warning,
+                    "startup",
+                    &format!("Monitoring source 'ssh' failed: {} — blind spot active", e),
+                )).await;
             }
         });
     }
