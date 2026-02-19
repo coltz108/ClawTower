@@ -187,7 +187,7 @@ pub fn check_path_permissions(path: &str, max_mode: u32, label: &str) -> ScanRes
             } else {
                 ScanResult::new(
                     &format!("openclaw:perms:{}", label),
-                    ScanStatus::Fail,
+                    ScanStatus::Warn,
                     &format!("{} permissions {:o} — should be {:o} or tighter", path, mode, max_mode),
                 )
             }
@@ -625,7 +625,7 @@ pub fn scan_openclaw_credential_audit() -> ScanResult {
                 ScanResult::new("openclaw:credential_audit", ScanStatus::Pass,
                     &format!("All {} credential read-watch rules installed", required_watches.len()))
             } else {
-                ScanResult::new("openclaw:credential_audit", ScanStatus::Fail,
+                ScanResult::new("openclaw:credential_audit", ScanStatus::Warn,
                     &format!("Missing auditd read-watch rules for: {}. Run: clawtower setup audit-rules",
                         missing.join(", ")))
             }
@@ -784,7 +784,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         let result = check_path_permissions(dir.path().to_str().unwrap(), 0o700, "test_dir");
-        assert_eq!(result.status, ScanStatus::Fail);
+        assert_eq!(result.status, ScanStatus::Warn);
     }
 
     #[test]
@@ -817,7 +817,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o744)).unwrap();
         let result = check_path_permissions(dir.path().to_str().unwrap(), 0o700, "world_read");
-        assert_eq!(result.status, ScanStatus::Fail);
+        assert_eq!(result.status, ScanStatus::Warn);
     }
 
     #[test]
@@ -826,7 +826,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
         let result = check_path_permissions(dir.path().to_str().unwrap(), 0o700, "group_write");
-        assert_eq!(result.status, ScanStatus::Fail);
+        assert_eq!(result.status, ScanStatus::Warn);
     }
 
     #[test]

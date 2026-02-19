@@ -7,6 +7,8 @@ release-signing-key.private
 ClawTower-keyboard/
 scripts/deploy.sh
 scripts/pentest.sh
+scripts/analyze-alerts.sh
+patches/
 libclawtower*.so
 test_interpose
 .docs/

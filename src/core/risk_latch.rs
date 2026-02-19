@@ -7,6 +7,8 @@
 //! risk exceeds a threshold, the latch triggers (one-way) and the system
 //! should enter containment mode. Critical events count double.
 
+#![allow(dead_code)]
+
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -17,6 +19,7 @@ use super::alerts::Severity;
 /// Events are weighted by severity (Critical=2, Warning=1, Info=0) and expire
 /// after a configurable window. Once triggered, the latch stays triggered for
 /// the remainder of the session.
+#[allow(dead_code)]
 pub struct RiskLatch {
     threshold: u32,
     window: Duration,

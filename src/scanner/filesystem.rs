@@ -437,7 +437,7 @@ pub fn scan_shadow_quarantine_permissions() -> ScanResult {
         ScanResult::new("shadow_quarantine_perms", ScanStatus::Pass,
             "Shadow and quarantine directories properly hardened")
     } else {
-        ScanResult::new("shadow_quarantine_perms", ScanStatus::Fail,
+        ScanResult::new("shadow_quarantine_perms", ScanStatus::Warn,
             &format!("Permission issues: {}", issues.join("; ")))
     }
 }

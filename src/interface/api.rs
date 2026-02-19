@@ -573,6 +573,7 @@ mod tests {
         })
     }
 
+    #[allow(dead_code)]
     fn test_ctx_with_store(auth_token: &str, store: SharedAlertStore) -> Arc<ApiContext> {
         Arc::new(ApiContext {
             store,

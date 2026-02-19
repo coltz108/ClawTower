@@ -12,7 +12,7 @@ body:
     attributes:
       label: ClawTower version
       description: Output of `clawtower --version` or git commit hash
-      placeholder: "0.5.1-beta / abc1234"
+      placeholder: "0.5.2-beta / abc1234"
     validations:
       required: true
 

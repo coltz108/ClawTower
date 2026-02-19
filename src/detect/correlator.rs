@@ -263,7 +263,7 @@ impl Correlator {
     /// Evaluate whether the threat score warrants a state transition.
     fn evaluate_state_transition(&mut self) {
         let score = self.threat_score;
-        let now_name = self.state.name();
+        let _now_name = self.state.name();
 
         let new_state = if score >= THRESHOLD_LOCKDOWN {
             match &self.state {

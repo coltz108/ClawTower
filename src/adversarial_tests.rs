@@ -161,7 +161,7 @@ mod tests {
             c.tick(t);
             let score_before = c.threat_score;
             c.ingest(make_event_at(t, EventSource::LdPreload, EventKind::OpenFile, 1, 100.0, "suspicious"));
-            let score_after = c.threat_score;
+            let _score_after = c.threat_score;
 
             // After first event, score should have decayed between events
             if i > 0 {
