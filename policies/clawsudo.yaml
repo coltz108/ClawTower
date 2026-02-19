@@ -195,10 +195,48 @@ rules:
     action: info
     enforcement: allow
 
-  - name: "allow-file-ops"
-    description: "Allow common file operations via sudo"
+  # ── Path-Scoped File Operations ─────────────────────────────────────
+  - name: "allow-file-ops-tmp"
+    description: "Allow file ops only under /tmp and /var/tmp"
     match:
-      command: ["cp", "mv", "mkdir", "chown", "chmod", "rm", "tee", "sed", "cat"]
+      command_contains:
+        - "cp /tmp/"
+        - "cp /var/tmp/"
+        - "mv /tmp/"
+        - "mv /var/tmp/"
+        - "rm /tmp/"
+        - "rm /var/tmp/"
+        - "mkdir /tmp/"
+        - "mkdir /var/tmp/"
+    action: info
+    enforcement: allow
+
+  - name: "allow-file-ops-openclaw-home"
+    description: "Allow file ops under openclaw home"
+    match:
+      command_contains:
+        - "cp /home/openclaw/"
+        - "mv /home/openclaw/"
+        - "chown openclaw"
+        - "chmod /home/openclaw/"
+        - "mkdir /home/openclaw/"
+    action: info
+    enforcement: allow
+
+  - name: "allow-cat-read-only"
+    description: "Allow cat for reading (no redirect detection at clawsudo level)"
+    match:
+      command: ["cat"]
+    action: info
+    enforcement: allow
+
+  - name: "allow-tee-safe-paths"
+    description: "Allow tee only to safe staging paths"
+    match:
+      command_contains:
+        - "tee /tmp/"
+        - "tee /var/tmp/"
+        - "tee /home/openclaw/"
     action: info
     enforcement: allow
 
