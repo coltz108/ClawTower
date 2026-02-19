@@ -64,12 +64,14 @@ struct MatchResult {
     enforcement: Enforcement,
 }
 
-// ─── Config (minimal, just need webhook_url) ───
+// ─── Config (minimal, just need webhook_url + api section) ───
 
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
     slack: Option<SlackSection>,
+    #[serde(default)]
+    api: Option<ApiSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +82,21 @@ struct SlackSection {
     #[serde(default)]
     backup_webhook_url: String,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+struct ApiSection {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_api_bind")]
+    bind: String,
+    #[serde(default = "default_api_port")]
+    port: u16,
+    #[serde(default)]
+    auth_token: String,
+}
+
+fn default_api_bind() -> String { "127.0.0.1".to_string() }
+fn default_api_port() -> u16 { 18791 }
 
 // ─── Policy engine ───
 
@@ -219,6 +236,101 @@ fn send_slack_sync(webhook_url: &str, text: &str) {
         .json(&payload)
         .timeout(Duration::from_secs(5))
         .send();
+}
+
+// ─── Unified Approval API ───
+
+/// Load the API section from config.toml.
+/// Returns None if not found or not enabled.
+fn load_api_config() -> Option<ApiSection> {
+    let paths = [
+        PathBuf::from("/etc/clawtower/config.toml"),
+        PathBuf::from("./config.toml"),
+    ];
+    for path in &paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(cf) = toml::from_str::<ConfigFile>(&content) {
+                if let Some(api) = cf.api {
+                    if api.enabled {
+                        return Some(api);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Try the unified approval API path.
+///
+/// Returns:
+/// - `Some(true)` — approved via API
+/// - `Some(false)` — denied or timed out via API
+/// - `None` — API unreachable or not configured (caller should fall back to file-touch)
+fn try_api_approval(full_cmd: &str, timeout_secs: u64) -> Option<bool> {
+    let api = load_api_config()?;
+    let api_base = format!("http://{}:{}", api.bind, api.port);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    // Step 1: POST /api/approvals
+    let mut req = client
+        .post(format!("{}/api/approvals", api_base))
+        .json(&serde_json::json!({
+            "command": full_cmd,
+            "agent": "clawsudo",
+            "context": format!("clawsudo approval request for: {}", full_cmd),
+            "severity": "warning",
+            "timeout_secs": timeout_secs
+        }));
+
+    if !api.auth_token.is_empty() {
+        req = req.bearer_auth(&api.auth_token);
+    }
+
+    let resp = req.send().ok()?;
+
+    if !resp.status().is_success() {
+        return None; // API error — fall back to file-touch
+    }
+
+    let body: serde_json::Value = resp.json().ok()?;
+    let id = body["id"].as_str()?;
+
+    // Step 2: Poll GET /api/approvals/{id} every 2 seconds
+    let poll_client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_secs(2));
+
+        let mut poll_req = poll_client.get(format!("{}/api/approvals/{}", api_base, id));
+        if !api.auth_token.is_empty() {
+            poll_req = poll_req.bearer_auth(&api.auth_token);
+        }
+
+        let resp = match poll_req.send() {
+            Ok(r) => r,
+            Err(_) => continue, // transient network error, keep polling
+        };
+
+        if let Ok(body) = resp.json::<serde_json::Value>() {
+            match body["status"].as_str() {
+                Some("approved") => return Some(true),
+                Some("denied") | Some("timed_out") => return Some(false),
+                Some("pending") => continue,
+                _ => return None, // unexpected status — fall back
+            }
+        }
+    }
+
+    Some(false) // timed out locally
 }
 
 // ─── GTFOBins shell escape detection ───
@@ -502,31 +614,10 @@ fn main() -> ExitCode {
             );
             log_line("PENDING", &full_cmd);
 
-            // Ensure secure approval directory exists (root-only, mode 0700)
-            ensure_approval_dir();
-
-            // SHA-256 based approval filename (not collision-prone DefaultHasher)
-            let approval_file = approval_path(&full_cmd);
-
-            if let Some(ref url) = webhook_url {
-                send_slack_sync(
-                    url,
-                    &format!(
-                        "⚠️ *WARNING* clawsudo awaiting approval for: `{}`\nTo approve: `sudo touch {}`",
-                        full_cmd, approval_file
-                    ),
-                );
-            }
-
-            // Wait up to 5 minutes, using atomic consume to prevent TOCTOU races
-            let start = Instant::now();
-            let timeout = Duration::from_secs(300);
-            loop {
-                // Atomic: try to unlink the file. If we succeed, we consumed the
-                // approval. If ENOENT, either it doesn't exist yet or another
-                // process already consumed it.
-                if consume_approval(&approval_file) {
-                    eprintln!("✅ Approved!");
+            // Try unified approval API first (orchestrator handles Slack/TUI/tray)
+            match try_api_approval(&full_cmd, 300) {
+                Some(true) => {
+                    eprintln!("✅ Approved via ClawTower API");
                     log_line("ALLOWED", &full_cmd);
                     let status = std::process::Command::new("sudo")
                         .args(&args)
@@ -540,12 +631,61 @@ fn main() -> ExitCode {
                         }
                     };
                 }
-                if start.elapsed() >= timeout {
-                    eprintln!("⏰ Approval timed out");
-                    log_line("TIMEOUT", &full_cmd);
-                    return ExitCode::from(EXIT_TIMEOUT);
+                Some(false) => {
+                    eprintln!("🔴 Denied via ClawTower API");
+                    log_line("DENIED", &full_cmd);
+                    return ExitCode::from(EXIT_DENIED);
                 }
-                std::thread::sleep(Duration::from_secs(2));
+                None => {
+                    // API unreachable — fall back to file-touch + Slack
+                    eprintln!("⏳ API unreachable, falling back to manual approval...");
+
+                    // Ensure secure approval directory exists (root-only, mode 0700)
+                    ensure_approval_dir();
+
+                    // SHA-256 based approval filename (not collision-prone DefaultHasher)
+                    let approval_file = approval_path(&full_cmd);
+
+                    if let Some(ref url) = webhook_url {
+                        send_slack_sync(
+                            url,
+                            &format!(
+                                "⚠️ *WARNING* clawsudo awaiting approval for: `{}`\nTo approve: `sudo touch {}`",
+                                full_cmd, approval_file
+                            ),
+                        );
+                    }
+
+                    // Wait up to 5 minutes, using atomic consume to prevent TOCTOU races
+                    let start = Instant::now();
+                    let timeout = Duration::from_secs(300);
+                    loop {
+                        // Atomic: try to unlink the file. If we succeed, we consumed the
+                        // approval. If ENOENT, either it doesn't exist yet or another
+                        // process already consumed it.
+                        if consume_approval(&approval_file) {
+                            eprintln!("✅ Approved!");
+                            log_line("ALLOWED", &full_cmd);
+                            let status = std::process::Command::new("sudo")
+                                .args(&args)
+                                .status();
+                            return match status {
+                                Ok(s) if s.success() => ExitCode::from(EXIT_OK),
+                                Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
+                                Err(e) => {
+                                    eprintln!("Failed to execute sudo: {}", e);
+                                    ExitCode::from(EXIT_FAIL)
+                                }
+                            };
+                        }
+                        if start.elapsed() >= timeout {
+                            eprintln!("⏰ Approval timed out");
+                            log_line("TIMEOUT", &full_cmd);
+                            return ExitCode::from(EXIT_TIMEOUT);
+                        }
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                }
             }
         }
         None => {
@@ -553,28 +693,10 @@ fn main() -> ExitCode {
             eprintln!("⏳ No matching rule — awaiting approval (5 min timeout)...");
             log_line("PENDING", &full_cmd);
 
-            // Ensure secure approval directory exists (root-only, mode 0700)
-            ensure_approval_dir();
-
-            // SHA-256 based approval filename (not collision-prone DefaultHasher)
-            let approval_file = approval_path(&full_cmd);
-
-            if let Some(ref url) = webhook_url {
-                send_slack_sync(
-                    url,
-                    &format!(
-                        "⚠️ *WARNING* clawsudo: unknown command awaiting approval: `{}`\nTo approve: `sudo touch {}`",
-                        full_cmd, approval_file
-                    ),
-                );
-            }
-
-            // Wait up to 5 minutes, using atomic consume to prevent TOCTOU races
-            let start = Instant::now();
-            let timeout = Duration::from_secs(300);
-            loop {
-                if consume_approval(&approval_file) {
-                    eprintln!("✅ Approved!");
+            // Try unified approval API first (orchestrator handles Slack/TUI/tray)
+            match try_api_approval(&full_cmd, 300) {
+                Some(true) => {
+                    eprintln!("✅ Approved via ClawTower API");
                     log_line("ALLOWED", &full_cmd);
                     let status = std::process::Command::new("sudo")
                         .args(&args)
@@ -588,12 +710,58 @@ fn main() -> ExitCode {
                         }
                     };
                 }
-                if start.elapsed() >= timeout {
-                    eprintln!("⏰ Approval timed out");
-                    log_line("TIMEOUT", &full_cmd);
-                    return ExitCode::from(EXIT_TIMEOUT);
+                Some(false) => {
+                    eprintln!("🔴 Denied via ClawTower API");
+                    log_line("DENIED", &full_cmd);
+                    return ExitCode::from(EXIT_DENIED);
                 }
-                std::thread::sleep(Duration::from_secs(2));
+                None => {
+                    // API unreachable — fall back to file-touch + Slack
+                    eprintln!("⏳ API unreachable, falling back to manual approval...");
+
+                    // Ensure secure approval directory exists (root-only, mode 0700)
+                    ensure_approval_dir();
+
+                    // SHA-256 based approval filename (not collision-prone DefaultHasher)
+                    let approval_file = approval_path(&full_cmd);
+
+                    if let Some(ref url) = webhook_url {
+                        send_slack_sync(
+                            url,
+                            &format!(
+                                "⚠️ *WARNING* clawsudo: unknown command awaiting approval: `{}`\nTo approve: `sudo touch {}`",
+                                full_cmd, approval_file
+                            ),
+                        );
+                    }
+
+                    // Wait up to 5 minutes, using atomic consume to prevent TOCTOU races
+                    let start = Instant::now();
+                    let timeout = Duration::from_secs(300);
+                    loop {
+                        if consume_approval(&approval_file) {
+                            eprintln!("✅ Approved!");
+                            log_line("ALLOWED", &full_cmd);
+                            let status = std::process::Command::new("sudo")
+                                .args(&args)
+                                .status();
+                            return match status {
+                                Ok(s) if s.success() => ExitCode::from(EXIT_OK),
+                                Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
+                                Err(e) => {
+                                    eprintln!("Failed to execute sudo: {}", e);
+                                    ExitCode::from(EXIT_FAIL)
+                                }
+                            };
+                        }
+                        if start.elapsed() >= timeout {
+                            eprintln!("⏰ Approval timed out");
+                            log_line("TIMEOUT", &full_cmd);
+                            return ExitCode::from(EXIT_TIMEOUT);
+                        }
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                }
             }
         }
     }
