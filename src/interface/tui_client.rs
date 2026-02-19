@@ -105,6 +105,7 @@ pub async fn run_client_tui(config: &Config, config_path: PathBuf) -> Result<()>
         Some(scan_results),
         None,
         None,
+        None, // No local orchestrator in client mode
     )
     .await
 }

@@ -1480,6 +1480,7 @@ pub async fn run_tui(
     scan_results: Option<SharedScanResults>,
     falco_path_tx: Option<watch::Sender<PathBuf>>,
     samhain_path_tx: Option<watch::Sender<PathBuf>>,
+    mut approval_rx: Option<mpsc::Receiver<crate::approval::ApprovalRequest>>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -1530,6 +1531,25 @@ pub async fn run_tui(
                         actions_display: action.actions.iter().map(|a| a.to_string()).collect(),
                         playbook: action.playbook.clone(),
                         selected: 1, // default to DENY for safety
+                        message_buffer: String::new(),
+                        editing_message: false,
+                    });
+                }
+            }
+        }
+
+        // Check for orchestrator approval requests (from the unified approval system)
+        if let Some(ref mut rx) = approval_rx {
+            while let Ok(req) = rx.try_recv() {
+                if app.approval_popup.is_none() {
+                    app.approval_popup = Some(ApprovalPopup {
+                        action_id: req.id.clone(),
+                        threat_source: format!("{}", req.source),
+                        threat_message: format!("{}: {}", req.command, req.context),
+                        severity: req.severity.clone(),
+                        actions_display: vec![format!("Execute: {}", req.command)],
+                        playbook: None,
+                        selected: 1, // default to Deny for safety
                         message_buffer: String::new(),
                         editing_message: false,
                     });

@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
 use super::aggregator::AggregatorConfig;
@@ -16,8 +17,14 @@ use super::alerts::{Alert, Severity};
 use super::app_state::{AlertReceivers, AppState};
 use super::response::ResponseRequest;
 use super::{admin, aggregator, response, update};
+use crate::approval::{self, ApprovalOrchestrator};
 use crate::interface::slack::SlackNotifier;
 use crate::interface::api;
+use crate::notify::ChannelRegistry;
+use crate::notify::slack::SlackChannel;
+use crate::notify::tui::TuiChannel;
+use crate::notify::tray::TrayChannel;
+use crate::notify::discord::DiscordChannel;
 use crate::{netpolicy, proxy, scanner, sentinel, tui};
 use crate::detect::barnacle;
 use crate::sources::{auditd, falco, firewall, journald, logtamper, memory_sentinel, network, samhain};
@@ -287,6 +294,23 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
         }
     });
 
+    // ── Approval orchestrator ─────────────────────────────────────────────
+    let (approval_tui_tx, approval_tui_rx) = mpsc::channel::<crate::approval::ApprovalRequest>(100);
+
+    let mut channel_registry = ChannelRegistry::new();
+    channel_registry.register(Arc::new(SlackChannel::new(&state.config.slack)));
+    channel_registry.register(Arc::new(DiscordChannel::new(&state.config.discord)));
+    channel_registry.register(Arc::new(TrayChannel::new(&state.config.tray)));
+    channel_registry.register(Arc::new(TuiChannel::new(approval_tui_tx)));
+
+    let orchestrator = Arc::new(ApprovalOrchestrator::new(channel_registry, 500));
+    let _orch_handle = {
+        let orch = orchestrator.clone();
+        tokio::spawn(async move {
+            approval::run_orchestrator(orch).await;
+        })
+    };
+
     // ── Aggregator ──────────────────────────────────────────────────────────
 
     let agg_config = if state.config.incident_mode.enabled
@@ -361,7 +385,7 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
             policy_dir: Some(PathBuf::from(&state.config.policy.dir)),
             barnacle_dir: Some(PathBuf::from(&state.config.barnacle.vendor_dir)),
             active_profile: state.profile_name.clone(),
-            orchestrator: None, // Wired in Task 11
+            orchestrator: Some(orchestrator.clone()),
             slack_signing_secret: state.config.slack.signing_secret.clone(),
         });
         let bind = state.config.api.bind.clone();
@@ -408,6 +432,7 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
             response_tx,
             falco_path_tx,
             samhain_path_tx,
+            approval_tui_rx,
         ).await?;
     }
 
@@ -448,6 +473,7 @@ async fn run_tui_frontend(
     response_tx: Option<mpsc::Sender<ResponseRequest>>,
     falco_path_tx: watch::Sender<PathBuf>,
     samhain_path_tx: watch::Sender<PathBuf>,
+    approval_tui_rx: mpsc::Receiver<crate::approval::ApprovalRequest>,
 ) -> Result<()> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
@@ -468,6 +494,7 @@ async fn run_tui_frontend(
             Some(scan_results),
             Some(falco_path_tx),
             Some(samhain_path_tx),
+            Some(approval_tui_rx),
         ) => { result?; }
         _ = &mut shutdown_rx => { /* SIGTERM received, exit cleanly */ }
     }
